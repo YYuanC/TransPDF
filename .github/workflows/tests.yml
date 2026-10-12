@@ -1,10 +1,8 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # Run source tests manually; no automatic push or pull request triggers.
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

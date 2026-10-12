@@ -1,9 +1,7 @@
 name: Build application
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
+  # Automatic builds are disabled; PyInstaller packaging is currently unsupported.
   workflow_dispatch:
 
 env:

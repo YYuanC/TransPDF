@@ -23,10 +23,10 @@ For Bing Translator: text blocks are sent to `www.bing.com` over HTTPS. The back
 
 ## Paperless-ngx webhook data flow
 
-When using the webhook container, the full chain is:
+When running the webhook from source, the full chain is:
 
 ```
-Paperless-ngx → webhook container → TransPDF → translation backend
+Paperless-ngx → webhook receiver → TransPDF → translation backend
 ```
 
 - The webhook receives a document notification from Paperless (on your LAN)
@@ -34,7 +34,7 @@ Paperless-ngx → webhook container → TransPDF → translation backend
 - It calls TransPDF, which extracts text and forwards it to the configured backend (Ollama or LibreTranslate on your LAN)
 - The translated companion PDF is uploaded back to Paperless (LAN)
 
-At no point does the webhook container contact any external service. The privacy guarantee is the same as the main app — determined entirely by which translation backend is configured.
+The webhook contacts the configured Paperless, TransPDF, and LibreTranslate endpoints. The privacy guarantee is the same as the main app — determined entirely by which endpoints and translation backend are configured.
 
 ## Verify it yourself
 
@@ -50,28 +50,7 @@ sudo tcpdump -i any -n \
 
 Translate a document with the Ollama or LibreTranslate backend, then stop the capture. Open `capture.pcap` in Wireshark — if there are no external connections, nothing left your network.
 
-### Option 2 — Docker network isolation
-
-Run TransPDF in a Docker network with `internal: true`. Docker blocks all external traffic on that network. If translation completes, it demonstrably cannot have reached the internet.
-
-```yaml
-networks:
-  internal:
-    internal: true
-
-services:
-  transpdf:
-    build: .
-    image: transpdf:local
-    networks: [internal]
-    ports:
-      - "7860:7860"
-  libretranslate:
-    image: libretranslate/libretranslate:latest
-    networks: [internal]
-```
-
-### Option 3 — Read the source
+### Option 2 — Read the source
 
 The backends are short and self-contained:
 
@@ -101,12 +80,16 @@ Or on Windows:
 [System.Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 ```
 
-**Set it in docker-compose.yml:**
-```yaml
-services:
-  transpdf:
-    environment:
-      PDF_TRANSLATE_API_KEY: "your-key-here"
+**Set it before starting from source (Linux/macOS):**
+```bash
+export PDF_TRANSLATE_API_KEY="your-key-here"
+python app.py
+```
+
+**Windows PowerShell:**
+```powershell
+$env:PDF_TRANSLATE_API_KEY = "your-key-here"
+python app.py
 ```
 
 **Use it in curl:**
@@ -134,13 +117,14 @@ translate.yourdomain.com {
 }
 ```
 
-### Webhook container
+### Webhook receiver
 
-The same pattern applies to the webhook container via `WEBHOOK_API_KEY`. If set, `POST /webhook` requires `Authorization: Bearer <key>`. Configure the matching header in your Paperless Workflow webhook settings.
+The same pattern applies to the webhook receiver via `WEBHOOK_API_KEY`. If set, `POST /webhook` requires `Authorization: Bearer <key>`. Configure the matching header in your Paperless Workflow webhook settings.
 
-```yaml
-services:
-  transpdf-webhook:
-    environment:
-      WEBHOOK_API_KEY: "your-webhook-key-here"
+```bash
+# In the same terminal as the webhook's other environment variables:
+export WEBHOOK_API_KEY="your-webhook-key-here"
+python -m uvicorn webhook:app --host 0.0.0.0 --port 8081
 ```
+
+On Windows PowerShell, use `$env:WEBHOOK_API_KEY = "your-webhook-key-here"`. Run the webhook from the `paperless_webhook` directory as described in its [README](../paperless_webhook/README.md).

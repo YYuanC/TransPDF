@@ -1,6 +1,6 @@
 # 🔧 Setting up translation backends
 
-TransPDF supports four translation backends. **LibreTranslate is bundled in `docker-compose.yml`** — it starts alongside TransPDF with no extra configuration and is available as a local backend. **Ollama** is the alternative for LLM-quality translations. **Google Translate** and **Bing Translator** work without API keys but send your PDF text to their cloud services; use them only for quick tests or non-sensitive documents.
+TransPDF supports four translation backends and runs from source (see the [README](../README.md#快速开始)). **LibreTranslate** and **Ollama** must be installed separately or reached through an existing instance. **Google Translate** and **Bing Translator** work without API keys but send your PDF text to their cloud services; use them only for quick tests or non-sensitive documents.
 
 ## 🦙 Ollama
 
@@ -8,7 +8,7 @@ Ollama runs open-source LLMs locally. Your documents never leave your machine or
 
 → [ollama.com](https://ollama.com) for downloads and the full model library.
 
-### 🖥️ Option A — Local install (same machine as TransPDF)
+### 🖥️ Local install (same machine as TransPDF)
 
 **1. Install Ollama**
 
@@ -42,48 +42,7 @@ In the UI, expand **Backend settings** and set:
 
 Click **Test connection**, then **Save configuration**.
 
-### 🐳 Option B — Docker Compose (Ollama + TransPDF together)
-
-```yaml
-volumes:
-  transpdf_data:
-  ollama_data:
-
-services:
-  transpdf:
-    build: .
-    image: transpdf:local
-    ports:
-      - "7860:7860"
-    volumes:
-      - transpdf_data:/app/data
-    restart: unless-stopped
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    # Uncomment for NVIDIA GPU passthrough:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-```
-
-```bash
-docker compose up -d --build
-
-# Pull a model into the running container
-docker exec -it <project>-ollama-1 ollama pull translategemma:latest
-```
-
-In the UI, set **Ollama URL** to `http://ollama:11434` (Docker internal hostname).
+For an Ollama instance on another machine, set **Ollama URL** to its reachable address, such as `http://your-server-ip:11434`.
 
 ### ⚙️ OCR with Ollama vision models
 
@@ -111,59 +70,18 @@ LibreTranslate is a free, open-source translation API — fully self-hosted, no 
 
 → [libretranslate.com](https://libretranslate.com) · [GitHub](https://github.com/LibreTranslate/LibreTranslate)
 
-### 🐳 Docker Compose (recommended)
-
-```yaml
-volumes:
-  transpdf_data:
-  libretranslate_data:
-
-services:
-  transpdf:
-    build: .
-    image: transpdf:local
-    ports:
-      - "7860:7860"
-    volumes:
-      - transpdf_data:/app/data
-    environment:
-      - PDF_TRANSLATE_BACKEND=LibreTranslate
-      - LIBRETRANSLATE_URL=http://libretranslate:5000
-      # Delay after each call in each translation worker.
-      - LIBRETRANSLATE_BLOCK_DELAY_MS=200
-    restart: unless-stopped
-
-  libretranslate:
-    image: libretranslate/libretranslate:latest
-    ports:
-      - "5000:5000"
-    volumes:
-      - libretranslate_data:/home/libretranslate/.local/share
-    command: --req-limit 0 --load-only en,de,fr,es,it,nl,pt,ru,pl,ar,zh,ja,ko,tr
-    restart: unless-stopped
-```
-
-**`--req-limit 0`** disables the per-minute request limit — important for long documents where TransPDF makes many API calls (one per text block).
-
-**`--load-only`** restricts which language models are downloaded. Remove it to load all ~50 languages (uses more disk and RAM). First startup takes a few minutes while models download.
-
-```bash
-docker compose up -d --build
-
-# Monitor startup — wait for "Running on http://0.0.0.0:5000"
-docker compose logs -f libretranslate
-```
-
-In the UI, set **LibreTranslate URL** to `http://libretranslate:5000` (Docker internal hostname). Click **Test connection**, then **Save configuration**.
-
 ### 🖥️ Local install
 
+Install LibreTranslate in a separate virtual environment using the Python version supported by [LibreTranslate](https://github.com/LibreTranslate/LibreTranslate). Keep it separate from TransPDF's dependencies.
+
 ```bash
-pip install libretranslate
+python -m pip install libretranslate
 libretranslate --req-limit 0
 ```
 
-Set the URL to `http://localhost:5000` in TransPDF.
+Set the URL to `http://localhost:5000` in TransPDF, or the reachable address of an existing instance. Click **Test connection**, then **Save configuration**.
+
+**`--req-limit 0`** disables the per-minute request limit for long documents. Optionally use **`--load-only en,de,fr,es,it,nl,pt,ru,pl,ar,zh,ja,ko,tr`** to restrict downloaded language models. First startup may take a few minutes while models download.
 
 ### 🔑 API keys (optional)
 

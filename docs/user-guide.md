@@ -4,25 +4,19 @@ A self-hosted web app for translating PDF documents. Upload a PDF, choose your l
 
 ## 🚀 Starting the app
 
-### Docker (recommended)
+### Run from source
 
-```bash
-docker compose up -d --build
-```
-
-LibreTranslate starts alongside TransPDF as an available local backend. The default is Bing, which sends text externally; choose LibreTranslate or Ollama for local translation.
-
-### Bare Python
+Python 3.11+ is required. Follow the [README setup instructions](../README.md#快速开始) to clone the repository, create a virtual environment, and install `requirements.txt`. Docker deployment and PyInstaller executables are currently unsupported.
 
 ```bash
 # Activate the virtual environment (first time or new terminal)
-.venv\Scripts\activate        # Windows
+.\.venv\Scripts\Activate.ps1  # Windows PowerShell
 source .venv/bin/activate     # Linux / macOS
 
 python app.py
 ```
 
-> ⚠️ **The bare Python install defaults to Bing.** This is fine for testing, but your PDF text is sent to Bing's servers. Before translating sensitive documents, switch to LibreTranslate or Ollama in the **引擎设置** accordion.
+> ⚠️ **The app defaults to Bing.** This is fine for testing, but your PDF text is sent to Bing's servers. Before translating sensitive documents, start or connect to a LibreTranslate or Ollama instance and select it in the **引擎设置** accordion.
 
 Open **`http://localhost:7860`** in your browser.
 

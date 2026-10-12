@@ -4,7 +4,7 @@ Automatically translate documents as they are ingested into [Paperless-ngx](http
 
 ## How it works
 
-A lightweight webhook container runs alongside Paperless. When Paperless ingests a new document, its Workflow engine calls the webhook. The receiver detects the document language, sends the PDF to [TransPDF](../README.md), and uploads the translated companion back to Paperless. The original is never modified.
+A lightweight webhook receiver runs from Python source alongside Paperless. When Paperless ingests a new document, its Workflow engine calls the webhook. The receiver detects the document language, sends the PDF to [TransPDF](../README.md), and uploads the translated companion back to Paperless. The original is never modified.
 
 ```
 Paperless ingests document → OCR completes
@@ -25,6 +25,7 @@ The webhook responds 200 immediately — translation runs in the background and 
 ## Prerequisites
 
 - Paperless-ngx v2.x
+- Python 3.11+ and a checkout of this repository
 - [TransPDF](../README.md) running and reachable
 - LibreTranslate running and reachable (used for language detection)
 
@@ -44,7 +45,7 @@ The webhook logs a warning if this field is missing but still uploads the transl
 
 ### 2. Generate a Paperless API token
 
-Go to **My Profile → API Token** and copy the token. Store it in your `.env` file as `PAPERLESS_API_TOKEN`.
+Go to **My Profile → API Token** and copy the token. Set it as the `PAPERLESS_API_TOKEN` environment variable before starting the webhook (see below).
 
 ### 3. Configure a Paperless Workflow
 
@@ -56,59 +57,59 @@ Go to **Settings → Workflows → Add Workflow**:
 | Trigger | Document added |
 | Filter | *(leave empty to process all documents)* |
 | Action | Webhook |
-| URL | `http://transpdf-webhook:8081/webhook` |
+| URL | `http://<webhook-host>:8081/webhook` |
 
-The URL uses the Docker service name — both containers must be on the same Docker network (the default compose network satisfies this automatically).
+Replace `<webhook-host>` with the hostname or IP of the machine running the receiver, reachable from Paperless. If Paperless runs in a container, `localhost` refers to that container; use the receiver host's reachable address.
 
-## Deploy
+## Run from source
 
-Add the webhook service alongside your existing Paperless services in `docker-compose.yml`. No changes to the `paperless-ngx` service are needed.
+Docker deployment is currently unsupported. Start TransPDF from source using the [main README](../README.md#快速开始), and start LibreTranslate separately for language detection.
 
-```yaml
-services:
-  # ... your existing paperless-ngx, db, broker, etc. ...
-
-  transpdf-webhook:
-    # Path to your local TransPDF checkout (relative to this Compose file).
-    build: ./TransPDF/paperless_webhook
-    image: transpdf-paperless-webhook:local
-    container_name: transpdf-webhook
-    ports:
-      - "8081:8081"
-    volumes:
-      - <data-path>/transpdf-webhook:/data
-    environment:
-      # Paperless connection
-      PAPERLESS_URL: http://paperless-ngx:8000
-      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}        # in .env (secret)
-
-      # Translation pipeline
-      PDF_TRANSLATE_URL: http://<TransPDF-host>:7860
-      TRANSLATE_SOURCE_LANG: de                          # ISO 639-1, e.g. de, fr, nl — or "auto"
-      TRANSLATE_TARGET_LANG: en
-      TRANSLATE_OUTPUT: pdf                              # pdf | sbs | both
-      TRANSLATE_TIMEOUT: "300"
-      TRANSLATE_LOG_FILE: /data/translate.log
-
-      # TransPDF API settings — language detection + translation backend
-      LIBRETRANSLATE_URL: http://<libretranslate-host>:5000
-      PDF_TRANSLATE_SERVICE: LibreTranslate              # LibreTranslate | Ollama | Google
-      # PDF_TRANSLATE_LIBRE_URL: http://<libretranslate-host>:5000  # defaults to LIBRETRANSLATE_URL
-      # PDF_TRANSLATE_LIBRE_KEY: ""                      # if your LT instance requires an API key
-
-      # TransPDF API settings — processing flags
-      PDF_TRANSLATE_MERGE_BLOCKS: "true"                 # recommended: merge fragmented text (DTP/Paperless-archived PDFs)
-      # PDF_TRANSLATE_FORCE_OCR: "false"                 # force OCR even when text layer present
-      # PDF_TRANSLATE_ALLOW_WRAP: "false"                # collapse hard line breaks before translation
-      # PDF_TRANSLATE_FILTER_ICONS: "true"               # strip single-character icon glyphs
-      # PDF_TRANSLATE_DETECT_TABLES: "true"              # shrink-to-fit for table cells
-    restart: unless-stopped
-    depends_on:
-      - paperless-ngx
-```
+From the repository root, create a separate virtual environment for the webhook:
 
 ```bash
-docker compose up -d
+cd paperless_webhook
+python -m venv .venv
+```
+
+Activate it with `source .venv/bin/activate` on Linux/macOS, or `.\.venv\Scripts\Activate.ps1` in Windows PowerShell. Then install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Set the environment variables in the same terminal. Linux/macOS example:
+
+```bash
+export PAPERLESS_URL="http://localhost:8000"
+export PAPERLESS_API_TOKEN="your-paperless-token"
+export PDF_TRANSLATE_URL="http://localhost:7860"
+export LIBRETRANSLATE_URL="http://localhost:5000"
+export TRANSLATE_SOURCE_LANG="de"
+export TRANSLATE_TARGET_LANG="en"
+export TRANSLATE_LOG_FILE="./translate.log"
+export PDF_TRANSLATE_MERGE_BLOCKS="true"
+```
+
+Windows PowerShell example:
+
+```powershell
+$env:PAPERLESS_URL = "http://localhost:8000"
+$env:PAPERLESS_API_TOKEN = "your-paperless-token"
+$env:PDF_TRANSLATE_URL = "http://localhost:7860"
+$env:LIBRETRANSLATE_URL = "http://localhost:5000"
+$env:TRANSLATE_SOURCE_LANG = "de"
+$env:TRANSLATE_TARGET_LANG = "en"
+$env:TRANSLATE_LOG_FILE = "./translate.log"
+$env:PDF_TRANSLATE_MERGE_BLOCKS = "true"
+```
+
+Replace the URLs with addresses reachable from the receiver if the services run on other machines. The receiver does not load `.env` files automatically. Set `TRANSLATE_LOG_FILE` to a writable local path; its parent directory must already exist.
+
+Start the receiver and keep this terminal running:
+
+```bash
+python -m uvicorn webhook:app --host 0.0.0.0 --port 8081
 ```
 
 ## Environment variables
@@ -117,8 +118,8 @@ docker compose up -d
 
 | Variable | Default | Description |
 |---|---|---|
-| `PAPERLESS_URL` | `http://paperless-ngx:8000` | Paperless base URL — use the Docker service name when on the same compose network |
-| `PAPERLESS_API_TOKEN` | — | Paperless API token — keep in `.env` (secret) |
+| `PAPERLESS_URL` | `http://paperless-ngx:8000` | Paperless base URL — override with an address reachable from the Python process |
+| `PAPERLESS_API_TOKEN` | — | Paperless API token — set in the receiver's environment |
 
 ### Translation pipeline
 
@@ -129,7 +130,7 @@ docker compose up -d
 | `TRANSLATE_TARGET_LANG` | `en` | Target language (ISO 639-1) |
 | `TRANSLATE_OUTPUT` | `pdf` | What to upload: `pdf` (translated PDF), `sbs` (side-by-side bilingual PDF), or `both` (one of each — two companions per original) |
 | `TRANSLATE_TIMEOUT` | `300` | Seconds to wait for TransPDF. The orphaned job is cancelled automatically on timeout. |
-| `TRANSLATE_LOG_FILE` | `/data/translate.log` | Append-only JSON log. Mount `/data` to persist it on the host. |
+| `TRANSLATE_LOG_FILE` | `/data/translate.log` | Append-only JSON log. Override with a writable local path such as `./translate.log`; the parent directory must exist. |
 
 ### TransPDF API settings
 
@@ -137,7 +138,7 @@ These are passed as request parameters on every call to TransPDF. They configure
 
 | Variable | Default | Description |
 |---|---|---|
-| `LIBRETRANSLATE_URL` | `http://localhost:5000` | LibreTranslate base URL — used for **language detection** by this container |
+| `LIBRETRANSLATE_URL` | `http://localhost:5000` | LibreTranslate base URL — used for **language detection** by the receiver |
 | `PDF_TRANSLATE_SERVICE` | `LibreTranslate` | Translation backend passed to TransPDF: `LibreTranslate`, `Ollama`, `Google`, or `Bing` |
 | `PDF_TRANSLATE_LIBRE_URL` | *(= `LIBRETRANSLATE_URL`)* | LibreTranslate URL passed to TransPDF for **translation**. Defaults to `LIBRETRANSLATE_URL`. Set separately if TransPDF reaches LT via a different network path. |
 | `PDF_TRANSLATE_LIBRE_KEY` | *(empty)* | LibreTranslate API key (if your instance requires one) |
@@ -163,25 +164,21 @@ To retry a failed document: open it in Paperless → **Actions → Run Workflow*
 
 ## Backfill — translating existing documents
 
-The webhook only processes new documents as they arrive. To translate documents already in Paperless, use `backfill.py` — included in the same Docker image.
+The webhook only processes new documents as they arrive. To translate documents already in Paperless, run `backfill.py` from source in the `paperless_webhook` directory.
 
 It applies the same guards as the webhook: skips companions tagged `auto-translated`, skips originals that already have a `translation` link, and skips documents in the wrong language. Any translations it performs write to the same `TRANSLATE_LOG_FILE` and apply the same `translation-failed` tag on failure.
 
 ### Run
 
-Exec into the running webhook container — it already has all the right env vars:
+Activate the webhook virtual environment and set the same environment variables shown above in the terminal used for backfill:
 
 ```bash
 # Preview first — no changes:
-docker exec -it transpdf-webhook \
-  python backfill.py --start 1 --end 20 --dry-run
+python backfill.py --start 1 --end 20 --dry-run
 
 # Translate after reviewing the dry-run output:
-docker exec -it transpdf-webhook \
-  python backfill.py --start 1 --end 20
+python backfill.py --start 1 --end 20
 ```
-
-Replace `transpdf-webhook` with your container name if different.
 
 ### Output
 
@@ -218,7 +215,7 @@ Failures appear as `✗ failed: <reason>` in the terminal and as `"action": "fai
 
 - **Start small.** Run `--dry-run --start 1 --end 50` first to see what qualifies before committing.
 - **Work in batches.** Paperless IDs are not contiguous — there will be many "not found" gaps. Running 1–800 with `--dry-run` first tells you exactly how many documents will actually be translated.
-- **Check the log after.** `grep '"action": "failed"' /data/translate.log` shows anything that didn't make it through.
+- **Check the log after.** `grep '"action": "failed"' ./translate.log` shows anything that didn't make it through (use your configured `TRANSLATE_LOG_FILE` path).
 - **Safe to re-run.** Already-translated documents are always skipped — running twice does nothing extra.
 
 ## Output format
@@ -252,7 +249,7 @@ One JSON line per document, appended to `TRANSLATE_LOG_FILE`.
 {"action": "timeout", "source_id": 144, "source_title": "Document title", "reason": "exceeded 300s", "ts": "..."}
 ```
 
-To review failures: `grep '"action": "failed"\|"action": "timeout"' /data/translate.log`
+To review failures: `grep '"action": "failed"\|"action": "timeout"' ./translate.log` (use your configured `TRANSLATE_LOG_FILE` path).
 
 ## Endpoints
 
@@ -270,7 +267,7 @@ Language detection failed (LibreTranslate unreachable) or `TRANSLATE_SOURCE_LANG
 The `translation` field was not found in Paperless. Complete the one-time setup above. To link an already-translated document manually: set `translation` in the Paperless UI on the companion using the original's `source_id` from the log.
 
 **Webhook not firing**
-Verify the Paperless Workflow configuration. The webhook URL must be reachable from inside the Paperless container — use the Docker service name (`http://transpdf-webhook:8081/webhook`), not `localhost`.
+Verify the Paperless Workflow configuration. The webhook URL (`http://<webhook-host>:8081/webhook`) must be reachable from Paperless. If Paperless runs in a container, use the receiver host's reachable address; `localhost` refers to the Paperless container itself.
 
 **Timeout on large documents**
 Increase `TRANSLATE_TIMEOUT`. Check `GET <TransPDF-url>/api/health` to see if a job is still running or was cancelled.

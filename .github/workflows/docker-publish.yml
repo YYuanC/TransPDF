@@ -1,9 +1,7 @@
 name: Build and push Docker image
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
+  # Automatic builds are disabled; Docker deployment is currently unsupported.
   workflow_dispatch:
 
 env:

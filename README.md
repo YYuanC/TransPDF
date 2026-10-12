@@ -6,9 +6,10 @@ TransPDF 支持 PDF 文本提取、OCR 和版面回填，支持一次上传多�
 
 项目 fork 自 [jctots/pdf-translate](https://github.com/jctots/pdf-translate)，沿用 MIT 许可证。
 
+![alt text](/docs/image.png)
+
 ## 功能
 
-![alt text](/docs/image.png)
 - **网页界面**：选择文件、语言与翻译引擎，查看处理状态、切换文档并逐页对照预览。
 - **批量处理**：文件按顺序处理，单个文件失败后继续处理其余文件；成功结果可单独下载，也可导出含 `results.json` 处理报告的 ZIP。同名文件使用编号目录区分。
 - **并发翻译**：所有引擎支持每个 PDF 的文本块并发请求，默认 3 个线程，可设置为 1–128；OCR 与 PDF 写入仍按顺序执行。
@@ -25,10 +26,9 @@ TransPDF 支持 PDF 文本提取、OCR 和版面回填，支持一次上传多�
 | **Gradio** | 文件上传、参数配置、批量结果下载和左右预览界面 |
 | **FastAPI + Pydantic + Uvicorn** | REST API、参数校验、接口文档及 ASGI 服务；与网页界面共用 7860 端口 |
 | **PyMuPDF（`pymupdf`）** | PDF 读取、文本块和表格检测、页面渲染、字体提取、译文回填与对照 PDF 生成 |
-| **Tesseract + `pytesseract` + Pillow** | 扫描页面的本地文字识别与图像处理；Tesseract 需单独安装，Docker 镜像已包含 |
+| **Tesseract + `pytesseract` + Pillow** | 扫描页面的本地文字识别与图像处理；Tesseract 和源语言识别包需单独安装 |
 | **HTTPX** | 请求翻译后端和 Ollama OCR 接口，处理连接超时、错误与部分后端重试 |
 | **`ThreadPoolExecutor`** | 限制同时进行的文本块翻译请求，将结果写回对应页与文本块位置 |
-| **Docker / Docker Compose + GitHub Actions** | 容器部署、测试与镜像构建发布 |
 
 翻译流程：
 
@@ -36,17 +36,9 @@ TransPDF 支持 PDF 文本提取、OCR 和版面回填，支持一次上传多�
 
 ## 快速开始
 
-### Docker Compose
+### 从源码运行
 
-```bash
-git clone https://github.com/YYuanC/TransPDF.git
-cd TransPDF
-docker compose up -d --build
-```
-
-镜像发布工作流面向 `ghcr.io/yyuanc/transpdf` 与 `ghcr.io/yyuanc/transpdf-paperless-webhook`；正式发布前，请使用源码构建。
-
-### 本地 Python
+目前仅支持从源码运行。Docker 部署和 PyInstaller 打包存在问题，暂不维护；仓库中的相关文件保留供参考。
 
 需要 Python 3.11 或更新版本。
 
@@ -74,6 +66,10 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 python app.py
 ```
+
+启动后打开 <http://localhost:7860>。
+
+如需 Tesseract OCR，请单独安装 [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html) 和源语言识别包，并确保 `tesseract` 命令在 `PATH` 中可用。使用 Ollama 翻译或 OCR 时，需另行启动 Ollama 并下载对应模型；LibreTranslate 也需单独安装或连接已有实例。
 
 ## 翻译引擎与数据流向
 
@@ -142,7 +138,7 @@ API 同时执行一个任务，另一个可排队，再多的请求返回 429。
 | `PDF_TRANSLATE_BACKEND` | `Bing` | 首次启动时的网页默认引擎，以及 API 未指定 `service` 时的引擎 |
 | `PDF_TRANSLATE_THREADS` | `3` | 每份 PDF 的文本块并发数；已保存的 `translation_threads` 优先，API 请求可单独覆盖 |
 | `PDF_TRANSLATE_CJK_FONT_FAMILY` | `auto` | 中文字体初始样式：`auto`、`serif`、`sans-serif`、`wenkai`；已保存配置优先 |
-| `LIBRETRANSLATE_URL` | `http://localhost:5000` | LibreTranslate 默认地址；Compose 设为 `http://libretranslate:5000` |
+| `LIBRETRANSLATE_URL` | `http://localhost:5000` | LibreTranslate 实例地址，需单独启动或连接已有实例 |
 | `LIBRETRANSLATE_BLOCK_DELAY_MS` | `200` | LibreTranslate 每个工作线程单次翻译后的等待毫秒数 |
 | `PDF_TRANSLATE_MAX_UPLOAD_MB` | `100` | REST API 一次请求所有上传文件的总大小上限（MB） |
 | `PDF_TRANSLATE_API_KEY` | 空 | REST API 的可选 Bearer 密钥 |
