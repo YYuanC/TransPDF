@@ -1,4 +1,4 @@
-# 📖 pdf-translate — User Guide
+# 📖 TransPDF — User Guide
 
 A self-hosted web app for translating PDF documents. Upload a PDF, choose your languages and backend, and download the translated output.
 
@@ -7,10 +7,10 @@ A self-hosted web app for translating PDF documents. Upload a PDF, choose your l
 ### Docker (recommended)
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-LibreTranslate starts alongside pdf-translate. Your documents never leave your network.
+LibreTranslate starts alongside TransPDF as an available local backend. The default is Bing, which sends text externally; choose LibreTranslate or Ollama for local translation.
 
 ### Bare Python
 
@@ -22,7 +22,7 @@ source .venv/bin/activate     # Linux / macOS
 python app.py
 ```
 
-> ⚠️ **The bare Python install defaults to Google Translate.** This is fine for testing, but your PDF text is sent to Google's servers. Before translating sensitive documents, switch to LibreTranslate or Ollama in the **Backend settings** accordion.
+> ⚠️ **The bare Python install defaults to Bing.** This is fine for testing, but your PDF text is sent to Bing's servers. Before translating sensitive documents, switch to LibreTranslate or Ollama in the **引擎设置** accordion.
 
 Open **`http://localhost:7860`** in your browser.
 
@@ -30,11 +30,11 @@ Open **`http://localhost:7860`** in your browser.
 
 ### 1. Upload a PDF
 
-Click **PDF file** and select a file, or drag and drop it onto the upload area. The first page renders in the preview panel on the right.
+Click **PDF 文件（可多选）** and select one or more files, or drag and drop it onto the upload area. The first page renders in the preview panel on the right.
 
 ### 2. Set languages
 
-- **Source language** — the language of the original document. Set to *Auto-detect* if unsure; most backends handle this correctly.
+- **Source language** — the language of the original document. Set to *Auto-detect* if unsure; Bing currently treats Auto-detect as English; choose the actual source language for other documents.
 - **Target language** — the language you want the output in.
 
 ### 3. Choose a translation backend
@@ -44,12 +44,15 @@ Click **PDF file** and select a file, or drag and drop it onto the upload area. 
 | **Ollama** | Ollama running on LAN (configured URL + model) | Private documents, offline use |
 | **LibreTranslate** | LibreTranslate running on LAN (configured URL) | Offline, open-source alternative |
 | **Google** | Internet access | Quick tests and public documents only |
+| **Bing** | Internet access | Quick tests and public documents only |
 
-The active backend is shown in the dropdown. Backend URLs and models are configured in the **Backend settings** accordion at the bottom of the controls panel.
+The active backend is shown in the dropdown. Backend URLs and models are configured in the **引擎设置** accordion at the bottom of the controls panel.
 
-> **Privacy note:** Google Translate sends your PDF text to Google's servers. Use Ollama or LibreTranslate for any document that should not leave your network.
+> **Privacy note:** Google Translate and Bing Translator send your PDF text to their cloud services. Use Ollama or LibreTranslate for any document that should not leave your network.
 
 ### 4. Set options
+
+- **Translation threads (all backends)** (default: 3, range: 1–128) — Number of text blocks translated concurrently per PDF. Set to 1 for sequential requests, or increase to use multiple threads. Results keep their original page and block order. This applies to Ollama, LibreTranslate, Google, and Bing. **保存配置** persists the global default for both the UI and REST API. `PDF_TRANSLATE_THREADS` supplies the default when no saved value exists. OCR and PDF writing remain sequential. Higher values increase backend load; reduce the count if the backend returns rate-limit errors. LibreTranslate's configured delay is applied after each call in each worker.
 
 - ☐ **Allow text reflow** (default: off) — When on, consecutive lines within a text block are joined with a space before being sent to the translation backend. Helps when the original PDF has hard line breaks inside paragraphs (common in scanned or older PDFs), so the translator sees complete sentences rather than fragments. Keep off when line breaks are meaningful — addresses, bullet lists, tables, code blocks.
 
@@ -63,7 +66,21 @@ The active backend is shown in the dropdown. Backend URLs and models are configu
 
 ### 5. Translate
 
-Click **Translate**. The status box shows progress block by block. Translation time depends on document length and backend speed — from a few seconds (Google, short doc) to several minutes (Ollama, long doc).
+**Chinese fonts:** In Advanced settings, choose **Chinese font style** and save
+settings before translating. **Match original style** maps serif text to Source
+Han Serif and sans-serif text to Source Han Sans, retaining real bold weights.
+You can also choose Song-style serif, Hei-style sans-serif, or LXGW WenKai.
+WenKai applies to regular text; bold text keeps a matching Source Han bold font.
+
+For Chinese targets, the language choice also selects regional glyphs:
+`zh` uses mainland CN fonts, `zh-tw` uses Taiwan TW fonts, and `zh-hk` uses Hong
+Kong HK fonts. WenKai uses GB for simplified text and TC for traditional text.
+All fonts are bundled and embedded; symbols receive separate fallback fonts.
+The exported PDF retains selectable Unicode text and attempts font subsetting
+to reduce size. Font selection follows each block's source style; mixed styles
+inside a single block currently use the block's first source span.
+
+Click **开始翻译**. The status box shows progress block by block. Translation time depends on document length and backend speed — from a few seconds (Google or Bing, short doc) to several minutes (Ollama, long doc).
 
 Do not navigate away or close the tab while translating.
 
@@ -83,7 +100,7 @@ After translation, use the **◀ Prev** and **Next ▶** buttons to flip through
 
 ## 🔧 Backend configuration
 
-Open the **Backend settings** accordion in the controls panel.
+Open the **引擎设置** accordion in the controls panel.
 
 ### Ollama
 
@@ -109,9 +126,13 @@ Click **Test connection** to verify and see the number of available language pai
 
 Uses the unofficial `translate.googleapis.com` endpoint — no API key or account required. Requires internet access. Your PDF text is sent to Google's servers; not suitable for confidential documents. Not rate-limit-tested for large documents; use Ollama or LibreTranslate for high-volume or offline use.
 
+### Bing
+
+Select **Bing** from the main translation engine dropdown. It uses Bing's web translator endpoint — no API key or account required. Requires internet access and sends your PDF text to Bing. Bing accepts up to 1,000 characters per request and the unofficial endpoint may change without notice.
+
 ### Saving configuration
 
-Click **Save configuration** at the bottom of the Backend settings accordion. Settings are written to `config.json` next to `app.py` and loaded on next start. `config.json` is gitignored — it is never committed.
+Click **保存配置** at the bottom of the Backend settings accordion. Settings are written to `data/config.json` and loaded on next start. `data/` is gitignored — it is never committed.
 
 ## 🌍 Supported languages
 
@@ -127,7 +148,9 @@ Click **Save configuration** at the bottom of the Backend settings accordion. Se
 | `pt` | Português |
 | `ru` | Русский |
 | `ja` | 日本語 |
-| `zh` | 中文 |
+| `zh` | 中文（简体） |
+| `zh-tw` | 中文（繁體，台灣；target only） |
+| `zh-hk` | 中文（繁體，香港；target only） |
 | `ko` | 한국어 |
 | `ar` | العربية |
 | `tr` | Türkçe |
@@ -147,4 +170,4 @@ Auto-detect is only available as a source language. All codes can be used as the
 ## 📚 Further reading
 
 - [API reference](api.md) — REST API, timeouts, Paperless-ngx integration
-- [Backends](backends.md) — Ollama and LibreTranslate setup
+- [Backends](backends.md) — Ollama, LibreTranslate, Google, and Bing setup

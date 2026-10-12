@@ -4,7 +4,7 @@ backfill.py — Batch-translate existing Paperless-ngx documents.
 
 Iterates over a range of document IDs, applies the same guards as the webhook
 (skips companions, skips already-translated, checks source language), and
-translates qualifying documents via pdf-translate.
+translates qualifying documents via TransPDF.
 
 Usage:
     # Preview what would be translated (no changes):
@@ -13,7 +13,7 @@ Usage:
     # Translate all matching docs in range:
     python backfill.py --start 1 --end 50
 
-    # Slower pace to avoid overwhelming pdf-translate:
+    # Slower pace to avoid overwhelming TransPDF:
     python backfill.py --start 1 --end 800 --delay 5
 
     # Via Docker (same image as the webhook):
@@ -25,7 +25,7 @@ Usage:
       -e TRANSLATE_SOURCE_LANG=de \\
       -e TRANSLATE_TARGET_LANG=en \\
       -e PDF_TRANSLATE_MERGE_BLOCKS=true \\
-      ghcr.io/jctots/pdf-translate-paperless-webhook:latest \\
+      ghcr.io/yyuanc/transpdf-paperless-webhook:latest \\
       python backfill.py --start 1 --end 50 --dry-run
 
 Environment variables: same as the webhook container. See README.md.
@@ -106,7 +106,7 @@ def run(start: int, end: int, dry_run: bool, delay: float) -> None:
     total = end - start + 1
     counts = {"translated": 0, "skipped": 0, "not_found": 0, "error": 0}
 
-    print(f"\npdf-translate backfill — IDs {start}–{end} ({total} to check)")
+    print(f"\nTransPDF backfill — IDs {start}–{end} ({total} to check)")
     if dry_run:
         print("DRY RUN — no translations will be performed\n")
 
@@ -207,7 +207,7 @@ def run(start: int, end: int, dry_run: bool, delay: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Batch-translate existing Paperless-ngx documents via pdf-translate.",
+        description="Batch-translate existing Paperless-ngx documents via TransPDF.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -225,7 +225,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--delay", type=float, default=2.0, metavar="SECONDS",
-        help="Pause between translations to avoid overwhelming pdf-translate (default: 2.0)",
+        help="Pause between translations to avoid overwhelming TransPDF (default: 2.0)",
     )
     args = parser.parse_args()
 

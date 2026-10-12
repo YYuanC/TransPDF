@@ -1,5 +1,5 @@
 """
-pdf-translate — typed exceptions.
+TransPDF — typed exceptions.
 
 Raised at the point of failure so callers can distinguish error categories
 without string-matching exception messages.

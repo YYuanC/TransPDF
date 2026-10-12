@@ -1,5 +1,5 @@
 """
-pdf-translate — OCR utilities for scanned PDFs.
+TransPDF — OCR utilities for scanned PDFs.
 
 Covers:
   source_lang_to_tesseract  map ISO 639-1 source code to Tesseract lang string

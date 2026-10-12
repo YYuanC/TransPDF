@@ -1,5 +1,5 @@
 """
-pdf-translate — Ollama backend.
+TransPDF — Ollama backend.
 
 Uses POST /api/chat with a configurable system prompt.
 Tested with translategemma:latest.

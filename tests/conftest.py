@@ -1,5 +1,5 @@
 """
-Shared fixtures for pdf-translate tests.
+Shared fixtures for TransPDF tests.
 """
 
 import sys

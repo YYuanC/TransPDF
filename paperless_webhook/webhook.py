@@ -1,8 +1,8 @@
 """
-webhook.py — Paperless-ngx webhook receiver for pdf-translate
+webhook.py — Paperless-ngx webhook receiver for TransPDF
 
 Paperless-ngx v2 Workflow triggers POST /webhook when a document is added.
-The handler detects language, translates via pdf-translate, and uploads a
+The handler detects language, translates via TransPDF, and uploads a
 companion translated PDF back to Paperless. The original is never modified.
 
 Deploy:
@@ -10,7 +10,7 @@ Deploy:
       -e PAPERLESS_URL=http://paperless-ngx:8000 \\
       -e PAPERLESS_API_TOKEN=<token> \\
       -e PDF_TRANSLATE_URL=http://<host>:7860 \\
-      ghcr.io/jctots/pdf-translate-paperless-webhook:latest
+      ghcr.io/yyuanc/transpdf-paperless-webhook:latest
 
 See README.md for full configuration and Paperless Workflow setup.
 """
@@ -50,16 +50,16 @@ TIMEOUT       = float(os.environ.get("TRANSLATE_TIMEOUT",  "300"))
 LOG_FILE      = os.environ.get("TRANSLATE_LOG_FILE",  "/data/translate.log")
 
 # ---------------------------------------------------------------------------
-# pdf-translate API settings — passed as request parameters on every call.
-# These configure how pdf-translate processes and translates the PDF.
-# pdf-translate never reads config.json for API calls; all settings come from
-# the request. Set these env vars on the webhook container to tune behavior.
+# TransPDF API settings — passed as request parameters on every call.
+# These configure how TransPDF processes and translates the PDF.
+# Backend settings come from each request. Translation threads and Chinese
+# font style use the saved global TransPDF defaults. Set these env vars on the webhook container to tune behavior.
 # ---------------------------------------------------------------------------
 
 API_SERVICE      = os.environ.get("PDF_TRANSLATE_SERVICE",       "LibreTranslate")
-# URL passed to pdf-translate for translation calls (may differ from
+# URL passed to TransPDF for translation calls (may differ from
 # LIBRETRANSLATE_URL if the LT instance is on a different network path from
-# the pdf-translate container). Defaults to LIBRETRANSLATE_URL.
+# the TransPDF container). Defaults to LIBRETRANSLATE_URL.
 API_LIBRE_URL    = os.environ.get("PDF_TRANSLATE_LIBRE_URL",     LIBRETRANSLATE_URL)
 API_LIBRE_KEY    = os.environ.get("PDF_TRANSLATE_LIBRE_KEY",     "")
 API_OLLAMA_URL   = os.environ.get("PDF_TRANSLATE_OLLAMA_URL",    "http://localhost:11434")
@@ -533,8 +533,8 @@ def handle(doc_id: int, content: str | None) -> None:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="pdf-translate — Paperless-ngx webhook",
-    description="Receives Paperless-ngx workflow webhooks and auto-translates documents via pdf-translate.",
+    title="TransPDF — Paperless-ngx webhook",
+    description="Receives Paperless-ngx workflow webhooks and auto-translates documents via TransPDF.",
 )
 
 

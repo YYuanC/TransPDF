@@ -54,7 +54,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/jctots/pdf-translate
+          images: ghcr.io/yyuanc/transpdf
           flavor: |
             latest=auto
           tags: |
@@ -93,7 +93,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/jctots/pdf-translate-paperless-webhook
+          images: ghcr.io/yyuanc/transpdf-paperless-webhook
           flavor: |
             latest=auto
           tags: |

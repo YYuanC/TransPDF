@@ -1,5 +1,5 @@
 """
-pdf-translate — LibreTranslate backend.
+TransPDF — LibreTranslate backend.
 
 API docs: https://libretranslate.com/docs/
 Self-hosted: https://github.com/LibreTranslate/LibreTranslate
@@ -13,6 +13,10 @@ from config import CONNECTION_TIMEOUT, TRANSLATE_TIMEOUT
 from exceptions import RateLimitError
 
 _RETRY_DELAYS = (2.0, 4.0, 8.0)  # seconds between 429 retries (3 retries total)
+_LANGUAGE_MAP = {
+    "zh-cn": "zh", "zh-hans": "zh",
+    "zh-tw": "zt", "zh-hk": "zt", "zh-hant": "zt",
+}
 
 
 def test_connection(url: str) -> str:
@@ -38,7 +42,11 @@ def call(text: str, source: str, target: str, url: str, key: str) -> str:
     Retries up to 3 times with exponential backoff (2 s → 4 s → 8 s) on HTTP
     429 Too Many Requests.  All other HTTP errors are raised immediately.
     """
-    payload: dict = {"q": text, "source": source, "target": target}
+    payload: dict = {
+        "q": text,
+        "source": _LANGUAGE_MAP.get(source.lower().replace("_", "-"), source),
+        "target": _LANGUAGE_MAP.get(target.lower().replace("_", "-"), target),
+    }
     if key:
         payload["api_key"] = key
 

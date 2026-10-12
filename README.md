@@ -1,181 +1,172 @@
-# 🌐 PDF Translate
+# TransPDF
 
-**Self-hosted PDF translation that keeps your documents private.**
+一个可自托管的 PDF 翻译工具，基于PyMuPDF。
 
-Upload a PDF, pick your languages and backend, get a translated PDF — with the original layout intact. No cloud accounts. No file size limits. No data leaving your network.
+TransPDF 支持 PDF 文本提取、OCR 和版面回填，支持一次上传多个文件、逐份下载或打包下载。文本块可以并发翻译；中文导出使用内置字体和地区字形，改善中文PDF显示和可复制文本的完整性。
 
-[![Tests](https://github.com/jctots/pdf-translate/actions/workflows/tests.yml/badge.svg)](https://github.com/jctots/pdf-translate/actions/workflows/tests.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Docker](https://ghcr-badge.egpl.dev/jctots/pdf-translate/size?tag=latest&label=ghcr.io)](https://github.com/jctots/pdf-translate/pkgs/container/pdf-translate)
+项目 fork 自 [jctots/pdf-translate](https://github.com/jctots/pdf-translate)，沿用 MIT 许可证。
 
-![Demo](docs/assets/demo-animation.gif)
+## 功能
 
-**Try it yourself** — click to open each file:
+![alt text](/docs/image.png)
+- **网页界面**：选择文件、语言与翻译引擎，查看处理状态、切换文档并逐页对照预览。
+- **批量处理**：文件按顺序处理，单个文件失败后继续处理其余文件；成功结果可单独下载，也可导出含 `results.json` 处理报告的 ZIP。同名文件使用编号目录区分。
+- **并发翻译**：所有引擎支持每个 PDF 的文本块并发请求，默认 3 个线程，可设置为 1–128；OCR 与 PDF 写入仍按顺序执行。
+- **中文字体**：自动匹配原文的中文字体；导出时嵌入字体并尝试子集化以减小文件体积。
+- **扫描文档**：支持 Tesseract OCR 或 Ollama 视觉模型；可强制 OCR 以忽略不完整的文本层。
+- **多效果输出**：译文 PDF、左右对照 PDF，以及不受原页面尺寸限制的对照 HTML。
+- **自动化集成**：提供 REST API、可选 API 密钥认证、任务状态与取消接口，并保留 Paperless-ngx webhook 和历史文档回填工具。
 
-| File | Description |
-|------|-------------|
-| [demo-document-de.pdf](docs/assets/demo-document-de.pdf) | Input — fake German medical letter (the demo document) |
-| [demo-document-de_en.pdf](docs/assets/demo-document-de_en.pdf) | Output — translated PDF (layout preserved) |
-| [demo-document-de_de_en.pdf](docs/assets/demo-document-de_de_en.pdf) | Output — side-by-side PDF (original \| translation) |
-| [demo-document-de_de_en.html](docs/assets/demo-document-de_de_en.html) | Output — HTML reading view |
+## 技术实现
 
-## ✨ Why pdf-translate?
+| 技术 | 用途 |
+| --- | --- |
+| **Python 3.11+** | 应用主体、配置读写、翻译调度与文件处理 |
+| **Gradio** | 文件上传、参数配置、批量结果下载和左右预览界面 |
+| **FastAPI + Pydantic + Uvicorn** | REST API、参数校验、接口文档及 ASGI 服务；与网页界面共用 7860 端口 |
+| **PyMuPDF（`pymupdf`）** | PDF 读取、文本块和表格检测、页面渲染、字体提取、译文回填与对照 PDF 生成 |
+| **Tesseract + `pytesseract` + Pillow** | 扫描页面的本地文字识别与图像处理；Tesseract 需单独安装，Docker 镜像已包含 |
+| **HTTPX** | 请求翻译后端和 Ollama OCR 接口，处理连接超时、错误与部分后端重试 |
+| **`ThreadPoolExecutor`** | 限制同时进行的文本块翻译请求，将结果写回对应页与文本块位置 |
+| **Docker / Docker Compose + GitHub Actions** | 容器部署、测试与镜像构建发布 |
 
-Most PDF translation tools either **send your files to the cloud** or **destroy the layout**. pdf-translate does neither.
+翻译流程：
 
-- 🔒 **Privacy-first** — use Ollama or LibreTranslate and your PDFs never leave your machine or LAN
-- 📐 **Layout preserved** — text is placed back at the original position; images, tables, and structure stay intact
-- 🖥️ **Self-hosted** — Docker Compose in two minutes; runs on any machine or home server
-- 🔌 **REST API included** — automate with curl, Python, or any scripting environment
-- 🗂️ **Paperless-ngx ready** — webhook container auto-translates ingested documents; companion PDF linked and searchable
-- 🔍 **Scanned PDF support** — Tesseract OCR and Ollama vision models (glm-ocr) handle image-only PDFs
-- 📄 **Three output formats** — translated PDF, side-by-side comparison PDF, HTML reading view
+**提取文本／OCR → 可选文本合并与表格检测 → 并发调用翻译引擎 → 字体选择与译文回填 → 生成 PDF、对照 PDF 和 HTML**。
 
-## 📊 How it compares
+## 快速开始
 
-| | pdf-translate | pdf2zh-next | Adobe Acrobat | Google Translate | DeepL |
-|---|---|---|---|---|---|
-| **Self-hosted** | ✅ | ✅ | ❌ | ❌ | ❌ |
-| **Privacy** | ✅ No cloud | ✅ No cloud | ❌ Cloud | ❌ Cloud | ❌ Cloud |
-| **Layout preserved** | ✅ | ✅ | ✅ | ⚠️ Partial | ⚠️ Partial |
-| **Scanned PDFs (OCR)** | ✅ | ❌ | ✅ | ❌ | ❌ |
-| **REST API** | ✅ | ❌ | ❌ | ❌ | ✅ Paid |
-| **Math / formulas** | ❌ | ✅ | ✅ | ❌ | ❌ |
-| **Setup complexity** | 🟢 Simple | 🟡 Moderate | 🔴 Subscription | 🟢 None | 🟢 None |
-| **Cost** | Free | Free | $20+/mo | Free (10 MB limit) | Freemium |
-
-**When to choose pdf-translate:** general documents — manuals, reports, contracts, invoices, scanned archives. Not the right tool for academic papers with LaTeX formulas (use [pdf2zh-next](https://github.com/pdf2zh/pdf2zh-next) for those).
-
-## 🚀 Quick start
-
-### 🐳 Docker (recommended — private by default)
-
-**Requires:** Docker and Docker Compose.
+### Docker Compose
 
 ```bash
-git clone https://github.com/jctots/pdf-translate.git
-cd pdf-translate
-docker compose up -d
-open http://localhost:7860
+git clone https://github.com/YYuanC/TransPDF.git
+cd TransPDF
+docker compose up -d --build
 ```
 
-**LibreTranslate starts alongside pdf-translate — your documents never leave your network.**
-First startup downloads ~2 GB of language models; subsequent starts are instant.
+镜像发布工作流面向 `ghcr.io/yyuanc/transpdf` 与 `ghcr.io/yyuanc/transpdf-paperless-webhook`；正式发布前，请使用源码构建。
 
-To use an external LibreTranslate instance or Ollama instead, see [docs/backends.md](docs/backends.md).
+### 本地 Python
 
-### 🐍 Bare Python (testing only)
+需要 Python 3.11 或更新版本。
 
 ```bash
+git clone https://github.com/YYuanC/TransPDF.git
+cd TransPDF
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Linux / macOS：
+
+```bash
+source .venv/bin/activate
+```
+
+安装依赖并启动：
+
+```bash
+python -m pip install -r requirements.txt
 python app.py
 ```
 
-> ⚠️ **The bare Python install defaults to Google Translate** — your PDF text is sent to Google's servers. This is intentional for quick local testing, but not suitable for sensitive documents. Switch to LibreTranslate or Ollama in the UI before translating anything private.
+## 翻译引擎与数据流向
 
-## 🔧 Translation backends
+| 引擎 | 所需条件 | 文本发送位置 |
+| --- | --- | --- |
+| **Bing** | 网络连接，无需 API 密钥；非官方接口 | Bing 服务器 |
+| **Google** | 网络连接，无需 API 密钥；非官方接口 | Google 服务器 |
+| **LibreTranslate** | 可访问的 LibreTranslate 实例，可选 API 密钥 | 配置的实例地址 |
+| **Ollama** | 可访问的 Ollama 实例与已下载的翻译模型，可选 Bearer 密钥 | 配置的实例地址 |
 
-| Backend | Privacy | Requires | Best for |
-|---------|---------|---------|---------|
-| **Ollama** | 🔒 Local | Ollama + a translation model | Sensitive documents, offline use |
-| **LibreTranslate** | 🔒 Local | Self-hosted LT instance | Open-source, no cloud dependency |
-| **Google Translate** | ☁️ Cloud | Internet access | Quick tests and public documents only |
+选择自己部署在本机或局域网中的 LibreTranslate / Ollama，可将翻译请求留在自己的基础设施内。若把其 URL 指向远程服务，文本也会发送到该远程服务。使用 Ollama OCR 时，页面图像发送到所配置的 Ollama 地址。
 
-Switch backends in the UI or via API — no restart needed.
+Bing / Google 接口仅可用于测试，该接口可能遇到限流或改变。
 
-> 🔒 Ollama and LibreTranslate call only the URL you configure — no telemetry, no external traffic. [How to verify →](docs/privacy.md)
+## 输出格式
 
-## 📦 Output formats
+| 文件 | 内容 |
+| --- | --- |
+| **译文 PDF** | 页面背景与原文位置基础上的译文，包含可选择和搜索的译文文本层 |
+| **对照 PDF** | 每页左侧原文、右侧译文，便于对照检查 |
+| **对照 HTML** | 原文与译文分栏排列，可重排阅读，不受原 PDF 文本框大小限制 |
+| **批量 ZIP** | 编号目录中的成功结果，以及记录各文件成功／失败状态的 `results.json` |
 
-Every translation produces three files:
+网页会提供三种输出；多文件任务额外提供 ZIP。REST API 可通过 `outputs` 选择返回格式，多文件请求始终返回 ZIP，报告包含失败文件。
 
-| Output | Description |
-|--------|-------------|
-| **Translated PDF** | Original layout, translated text. Selectable and searchable. |
-| **Side-by-side PDF** | Original \| Translation in landscape. Layout-matched for visual comparison. |
-| **HTML reading view** | Clean, reflowable — original and translated text side by side. Easiest to read when translated text is small. |
+## REST API
 
-## 🔌 REST API
+交互式接口文档：<http://localhost:7860/docs>。
 
-The same port serves a REST API alongside the Gradio UI:
+单文件翻译（以下为 Bash 示例；PowerShell 可使用 `curl.exe` 并将参数写在一行）：
 
 ```bash
-# Translate a PDF
-curl -X POST http://localhost:7860/api/translate \
+curl --max-time 600 http://localhost:7860/api/translate \
   -F "file=@document.pdf" \
-  -F "source=de" -F "target=en" \
+  -F "source=en" -F "target=zh" -F "service=Bing" \
+  -F "translation_threads=4" \
   --output translated.pdf
-
-# Check status
-curl http://localhost:7860/api/health
-
-# Cancel a running translation
-curl -X DELETE http://localhost:7860/api/translate
 ```
 
-Swagger UI at [`/docs`](http://localhost:7860/docs) · Full reference in [docs/api.md](docs/api.md)
-
-## 🗂️ Paperless-ngx integration
-
-Automatically translate documents as they arrive in [Paperless-ngx](https://docs.paperless-ngx.com/). A companion translated PDF is uploaded alongside the original and linked as a **Document Link** custom field — fully local, no cloud.
+批量翻译并下载全部格式：
 
 ```bash
-# Add to your Paperless docker-compose.yml
-services:
-  pdf-translate-webhook:
-    image: ghcr.io/jctots/pdf-translate-paperless-webhook:latest
-    environment:
-      PAPERLESS_URL: http://paperless-ngx:8000
-      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}
-      PDF_TRANSLATE_URL: http://<pdf-translate-host>:7860
-      LIBRETRANSLATE_URL: http://<libretranslate-host>:5000
-      TRANSLATE_SOURCE_LANG: de              # or "auto" for all languages
-      TRANSLATE_TARGET_LANG: en
-      PDF_TRANSLATE_MERGE_BLOCKS: "true"     # recommended for Paperless-archived PDFs
+curl --max-time 1800 http://localhost:7860/api/translate \
+  -F "file=@first.pdf" -F "file=@second.pdf" \
+  -F "source=en" -F "target=zh" -F "service=Bing" \
+  -F "outputs=all" \
+  --output translations.zip
 ```
 
-Then configure a Paperless Workflow (Settings → Workflows) to POST to `http://pdf-translate-webhook:8081/webhook` on document added.
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/api/health` | 版本、默认引擎、当前与最近任务状态 |
+| `GET` | `/api/config` | 读取配置，API 密钥字段脱敏 |
+| `PATCH` | `/api/config` | 部分更新配置，包括全局线程数和中文字体样式 |
+| `POST` | `/api/translate` | 同步翻译一个或多个 PDF |
+| `DELETE` | `/api/translate` | 请求取消正在执行的 API 翻译任务 |
 
-The webhook manages two Paperless tags automatically — no setup needed:
+API 同时执行一个任务，另一个可排队，再多的请求返回 429。HTTP 连接会持续到翻译完成，请按文档大小延长客户端与反向代理超时。取消任务会等待已经开始的后端请求结束；多文件响应即使部分或全部失败仍返回 200，需检查 ZIP 内的 `results.json`。
 
-| Tag | Meaning |
-|-----|---------|
-| `auto-translated` | Applied to companion PDFs — prevents re-translation loops |
-| `translation-failed` | Applied to originals on failure — cleared on successful retry. Filter `tag:translation-failed` to find documents needing attention. |
+设置 `PDF_TRANSLATE_API_KEY` 后，请求中添加 `Authorization: Bearer <key>`；健康检查不需要密钥。这只保护 REST API，网页界面需要另行通过反向代理设置访问控制。详见 [API 指南](docs/api.md) 与 [隐私说明](docs/privacy.md)。
 
-Full setup guide: [paperless_webhook/README.md](paperless_webhook/README.md)
+## 常用配置
 
-## 🛠️ Advanced options
+| 环境变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `PDF_TRANSLATE_BACKEND` | `Bing` | 首次启动时的网页默认引擎，以及 API 未指定 `service` 时的引擎 |
+| `PDF_TRANSLATE_THREADS` | `3` | 每份 PDF 的文本块并发数；已保存的 `translation_threads` 优先，API 请求可单独覆盖 |
+| `PDF_TRANSLATE_CJK_FONT_FAMILY` | `auto` | 中文字体初始样式：`auto`、`serif`、`sans-serif`、`wenkai`；已保存配置优先 |
+| `LIBRETRANSLATE_URL` | `http://localhost:5000` | LibreTranslate 默认地址；Compose 设为 `http://libretranslate:5000` |
+| `LIBRETRANSLATE_BLOCK_DELAY_MS` | `200` | LibreTranslate 每个工作线程单次翻译后的等待毫秒数 |
+| `PDF_TRANSLATE_MAX_UPLOAD_MB` | `100` | REST API 一次请求所有上传文件的总大小上限（MB） |
+| `PDF_TRANSLATE_API_KEY` | 空 | REST API 的可选 Bearer 密钥 |
+| `PDF_TRANSLATE_DEBUG` | 关闭 | 调试日志；日志可能包含文档文本，请按实际需要开启 |
 
-| Option | Default | Purpose |
-|--------|---------|---------|
-| **`PDF_TRANSLATE_API_KEY`** | _(unset)_ | Require `Authorization: Bearer <key>` on all API endpoints. Gradio UI unaffected. [How to generate →](docs/privacy.md#securing-the-api) |
-| **Force OCR** | Off | Ignore the text layer; OCR every page as an image. For scanned or mixed PDFs. |
-| **Merge split lines** | Off | Merge word-level fragments before translation. For DTP/InDesign PDFs with many small blocks. |
-| **Detect table cells** | On | Shrink-to-fit text within table cells to preserve table structure. |
-| **Filter icon glyphs** | On | Strip icon font characters that would otherwise appear as random letters. |
-| **Allow text reflow** | Off | Collapse hard line breaks within paragraphs before translating. |
+## 文档
 
-## 📚 Documentation
+- [使用指南](docs/user-guide.md) · [后端配置](docs/backends.md) · [API 指南](docs/api.md)
+- [测试说明](docs/testing.md) · [Paperless-ngx 集成](paperless_webhook/README.md)· [贡献指南](CONTRIBUTING.md) 
+- [隐私说明](docs/privacy.md)
 
-| Doc | Contents |
-|-----|---------|
-| [User guide](docs/user-guide.md) | All UI options explained in detail |
-| [API reference](docs/api.md) | REST API endpoints, timeouts, queue behaviour |
-| [Backends](docs/backends.md) | Ollama and LibreTranslate setup (local + Docker Compose) |
-| [Privacy](docs/privacy.md) | What each backend sends and how to verify it |
-| [Paperless-ngx](paperless_webhook/README.md) | Webhook container — auto-translate on ingest |
-| [Testing](docs/testing.md) | Running the test suite |
+## 开发与测试
 
-## 🤝 Contributing
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). All HTTP calls in the test suite are mocked — no live services needed to run tests.
+## 使用限制
 
-## 📄 License
-
-MIT — see [LICENSE](LICENSE).
-Bundled Liberation fonts: SIL Open Font License.
-
-*Built with [Claude Code](https://claude.ai/code) by Anthropic.*
+- 主要处理水平排列的普通文本，不专门恢复数学公式、复杂学术排版、竖排或旋转文字。
+- 原页面作为背景保留，译文覆盖原文区域；复杂多栏、彩色背景、文本膨胀或表格检测误判可能出现遮挡和溢出。需要更舒适的阅读时，可使用 HTML 对照。
+- 中文字体按文本块的原文样式选择，同一块内混合字体通常采用首个文本跨度的样式。当前部分思源字体导出的字符可能映射为兼容汉字，影响复制、搜索与文本精确匹配。
+- 扫描件质量会影响 OCR；Tesseract 需要源语言识别包，Ollama 视觉模型需要足够的计算资源。
+- 当前采用进程内任务状态，适合个人或受信任内网部署；无需配置分布式任务队列。
+- 翻译请求时，并发数越高，对后端负载越大；出现限流、超时或本地模型资源不足时，请减少线程数。
+- Bing 当前将 `auto` 按英语处理，非英语文档请明确选择源语言；其单次请求最多使用 1,000 个字符，较长文本块请改用其他引擎。

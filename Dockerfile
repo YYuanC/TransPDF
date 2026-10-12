@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-spa \
     tesseract-ocr-por \
     tesseract-ocr-ita \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-chi-tra \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

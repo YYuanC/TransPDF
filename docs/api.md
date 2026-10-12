@@ -1,4 +1,4 @@
-# 🔌 pdf-translate — API Operational Guide
+# 🔌 TransPDF — API Operational Guide
 
 Interactive API docs (Swagger UI) are available at **`http://localhost:7860/docs`** while the app is running. This document covers operational concerns not captured by Swagger: timeouts, queue behaviour, the cancellation workflow, and integration examples.
 
@@ -9,8 +9,51 @@ Interactive API docs (Swagger UI) are available at **`http://localhost:7860/docs
 | `GET` | `/api/health` | Service status + current job state |
 | `GET` | `/api/config` | Read backend configuration (keys masked) |
 | `PATCH` | `/api/config` | Partially update backend configuration |
-| `POST` | `/api/translate` | Translate a PDF |
+| `POST` | `/api/translate` | Translate one or more PDFs |
 | `DELETE` | `/api/translate` | Cancel the running translation |
+
+Chinese PDF font selection is controlled by the saved `cjk_font_family` setting.
+Use `PATCH /api/config` with `{"cjk_font_family": "auto"}`, `"serif"`,
+`"sans-serif"`, or `"wenkai"`. It applies to both UI and API exports. `auto`
+preserves the original block's serif/sans style and bold weight. WenKai applies
+to regular Chinese text; Source Han supplies real bold for bold blocks.
+
+Chinese targets `zh`, `zh-tw`, and `zh-hk` select CN, TW, and HK glyphs respectively;
+`zh-hant` also selects TW. Bing/Google receive the corresponding supported script
+code, while LibreTranslate uses `zt` for traditional Chinese (the server must
+have that language installed). Fonts are bundled locally and embedded on export.
+
+## 📚 Multiple files
+
+Repeat the `file` form field to translate a batch with shared language, backend,
+and processing settings:
+
+```bash
+curl --max-time 1800 -X POST http://localhost:7860/api/translate \
+  -F "file=@first.pdf" -F "file=@second.pdf" \
+  -F "source=en" -F "target=zh" -F "outputs=all" \
+  --output translations.zip
+```
+
+A single file keeps the existing response format and error codes. Two or more
+files always return a ZIP. `outputs=pdf` (default), `sbs`, `reading`, or `all`
+selects which formats are packaged for each successful document. Files run
+sequentially, retaining the configured text-block concurrency within each PDF.
+Numbered folders such as `001_first/` and `002_second/` prevent filename collisions.
+
+The ZIP includes `results.json`, an ordered report with each filename, `status`
+(`completed` or `failed`), and either an `outputs` list of ZIP member paths or
+`error` and `error_type`. A file failure does not stop later files. Batch responses
+return **200** even if some or all files fail; inspect the report to determine
+individual outcomes. Health reports `last.status` as `completed`, `partial`, or
+`failed` according to the results.
+
+The entire batch occupies one job in the API queue. `DELETE /api/translate`
+cancels the batch, prevents subsequent files from starting, and returns **409**
+from the waiting POST without a ZIP. Authentication and queue-full **429**
+responses apply to batches as well. The total uploaded bytes across all files
+must fit `PDF_TRANSLATE_MAX_UPLOAD_MB` (default: 100 MB); exceeding it returns
+**413** before translation starts. Raise client/proxy timeouts for longer batches.
 
 ## ⏱️ Synchronous behaviour and timeouts
 
@@ -22,7 +65,7 @@ Three independent timeouts are in play:
 
 | Layer | Where configured | Default | Notes |
 |-------|-----------------|---------|-------|
-| Per-block backend call | `TRANSLATE_TIMEOUT` in `config.py` | 30 s | Applied to each API call to Ollama / LibreTranslate / Google. If one block times out, the whole job fails with 500. |
+| Per-block backend call | `TRANSLATE_TIMEOUT` in `config.py` | 30 s | Applied to each API call to Ollama / LibreTranslate / Google / Bing. A timeout fails that document; a batch continues with the remaining documents. |
 | Client-side | In your script / curl | varies | The caller decides how long to wait. Must be set explicitly. |
 | Reverse proxy | nginx / Caddy config | 60 s (nginx default) | **Common gotcha.** nginx closes the connection after 60 s even if the client timeout is higher. |
 
@@ -54,7 +97,7 @@ location / {
 
 ## 🔄 Queue
 
-One translation runs at a time. One additional request may wait.
+One translation request (single PDF or batch) runs at a time. One additional request may wait. Within a PDF, text-block requests use the configured `translation_threads` count; the job queue is independent of this setting.
 
 | State | What happens |
 |-------|-------------|
@@ -136,11 +179,11 @@ Response:
 ```json
 {
   "status": "ok",
-  "message": "Cancellation requested. Translation stops after the current block."
+  "message": "Cancellation requested. Translation stops after in-flight blocks finish."
 }
 ```
 
-**Best-effort:** the current block's backend call (Ollama / LibreTranslate / Google) runs to completion before the pipeline stops. Cancellation is detected between blocks, not mid-call. For large Ollama models, this may take up to `TRANSLATE_TIMEOUT` (30 s) to take effect.
+**Best-effort:** in-flight block requests (Ollama / LibreTranslate / Google / Bing) run to completion before the pipeline stops. New blocks are no longer scheduled after cancellation is detected. Cancellation does not interrupt HTTP calls or backend retries, so completion depends on their timeouts and retry delays.
 
 After cancellation, the blocked `POST /api/translate` call returns **409**. The health endpoint reports `last.status: "cancelled"`.
 
@@ -155,6 +198,7 @@ The following form fields control how the PDF is scanned and prepared before tra
 | `merge_blocks` | bool | `false` | Merge same-line adjacent fragments into one block before translation. Enable for DTP/InDesign PDFs where each word is a separate text object (symptom: many small blocks per page, 429 errors on self-hosted backends). Not recommended for multi-column layouts. |
 | `detect_tables` | bool | `true` | Use PyMuPDF's table detector to identify table cells and apply shrink-to-fit text fitting. Disable if translated text appears abnormally small — this indicates a false-positive table detection. |
 | `force_ocr` | bool | `false` | Ignore the existing text layer entirely and OCR every page as an image (using the backend's OCR engine). Use for mixed PDFs where digital and scanned content are interleaved and translating the text layer alone gives incomplete results. Requires OCR dependencies (Tesseract or reachable Ollama vision model). |
+| `translation_threads` | int (1–128) | Saved global setting, otherwise `PDF_TRANSLATE_THREADS` (3) | Concurrent text-block requests per PDF for all backends. Overrides the global setting for this request. Page/block output order is preserved; OCR and PDF writing remain sequential. |
 
 ## 📦 Output formats
 
@@ -192,6 +236,16 @@ curl -X PATCH http://localhost:7860/api/config \
 ```
 
 Only supplied fields are changed. Changes persist to `config.json` immediately — no restart needed. The Gradio UI reflects the new values on next page load.
+
+Set the global thread count for UI and API translations with:
+
+```bash
+curl -X PATCH http://localhost:7860/api/config \
+  -H "Content-Type: application/json" \
+  -d '{"translation_threads": 4}'
+```
+
+The setting accepts integers from 1 to 128 and takes effect for new translations. A `translation_threads` form field overrides it for an individual API request. Saved configuration takes precedence over `PDF_TRANSLATE_THREADS`; saved `cjk_font_family` also applies to API exports; other saved backend settings remain UI-only. With LibreTranslate, the inter-call delay applies per worker, so increasing the thread count increases the overall request rate.
 
 ## ❌ Error reference
 

@@ -7,12 +7,29 @@ __pycache__/
 
 # Temp output files
 *.tmp
+.pytest_cache/
+pytest-cache-files-*/
+.test-tmp*/
+.coverage
+htmlcov/
+coverage.xml
+
+# Local credentials and editor files
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
 
 # Runtime config (written by the app; not source)
 data/
 
 # Build version (written by CI before docker build; not source)
 VERSION
+
+# PyInstaller output
+build/
+dist/
 
 # OS
 .DS_Store

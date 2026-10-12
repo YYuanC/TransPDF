@@ -3,8 +3,8 @@
 ## ⚙️ Development setup
 
 ```bash
-git clone https://github.com/jctots/pdf-translate.git
-cd pdf-translate
+git clone https://github.com/YYuanC/TransPDF.git
+cd TransPDF
 python -m venv .venv
 
 # Windows
@@ -46,11 +46,11 @@ No `translate_pdf()` wrapper is needed — the pipeline is handled centrally in 
 
 ## 📋 Changelog
 
-Release history is tracked in [GitHub Releases](https://github.com/jctots/pdf-translate/releases).
+Release history is tracked in [GitHub Releases](https://github.com/YYuanC/TransPDF/releases).
 
 ## 🐛 Reporting bugs
 
-Open a [GitHub issue](../../issues) with:
+Open a [GitHub issue](https://github.com/YYuanC/TransPDF/issues) with:
 - What you did
 - What you expected
 - What happened (include the error message or traceback)

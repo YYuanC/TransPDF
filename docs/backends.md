@@ -1,6 +1,6 @@
 # 🔧 Setting up translation backends
 
-pdf-translate supports three translation backends. **LibreTranslate is bundled in `docker-compose.yml` by default** — it starts alongside pdf-translate with no extra configuration and keeps your documents fully private. **Ollama** is the alternative for LLM-quality translations. **Google Translate** works without any setup but sends your PDF text to Google's servers; use it only for quick tests or non-sensitive documents.
+TransPDF supports four translation backends. **LibreTranslate is bundled in `docker-compose.yml`** — it starts alongside TransPDF with no extra configuration and is available as a local backend. **Ollama** is the alternative for LLM-quality translations. **Google Translate** and **Bing Translator** work without API keys but send your PDF text to their cloud services; use them only for quick tests or non-sensitive documents.
 
 ## 🦙 Ollama
 
@@ -8,7 +8,7 @@ Ollama runs open-source LLMs locally. Your documents never leave your machine or
 
 → [ollama.com](https://ollama.com) for downloads and the full model library.
 
-### 🖥️ Option A — Local install (same machine as pdf-translate)
+### 🖥️ Option A — Local install (same machine as TransPDF)
 
 **1. Install Ollama**
 
@@ -29,11 +29,11 @@ Recommended models:
 
 | Model | Size | Notes |
 |-------|------|-------|
-| `translategemma:latest` | ~4 GB | Good general-purpose translation; tested with pdf-translate |
+| `translategemma:latest` | ~4 GB | Good general-purpose translation; tested with TransPDF |
 | `qwen2.5:7b` | ~4 GB | Strong multilingual support |
 | `mistral:7b` | ~4 GB | Good European language coverage |
 
-**3. Configure pdf-translate**
+**3. Configure TransPDF**
 
 In the UI, expand **Backend settings** and set:
 - **Translation service** → `Ollama`
@@ -42,20 +42,21 @@ In the UI, expand **Backend settings** and set:
 
 Click **Test connection**, then **Save configuration**.
 
-### 🐳 Option B — Docker Compose (Ollama + pdf-translate together)
+### 🐳 Option B — Docker Compose (Ollama + TransPDF together)
 
 ```yaml
 volumes:
-  pdf_translate_data:
+  transpdf_data:
   ollama_data:
 
 services:
-  pdf-translate:
-    image: ghcr.io/jctots/pdf-translate:latest
+  transpdf:
+    build: .
+    image: transpdf:local
     ports:
       - "7860:7860"
     volumes:
-      - pdf_translate_data:/app/data
+      - transpdf_data:/app/data
     restart: unless-stopped
 
   ollama:
@@ -76,7 +77,7 @@ services:
 ```
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 
 # Pull a model into the running container
 docker exec -it <project>-ollama-1 ollama pull translategemma:latest
@@ -114,18 +115,21 @@ LibreTranslate is a free, open-source translation API — fully self-hosted, no 
 
 ```yaml
 volumes:
-  pdf_translate_data:
+  transpdf_data:
   libretranslate_data:
 
 services:
-  pdf-translate:
-    image: ghcr.io/jctots/pdf-translate:latest
+  transpdf:
+    build: .
+    image: transpdf:local
     ports:
       - "7860:7860"
     volumes:
-      - pdf_translate_data:/app/data
+      - transpdf_data:/app/data
     environment:
-      # Delay between LibreTranslate API calls (ms). Prevents 429 on self-hosted instances.
+      - PDF_TRANSLATE_BACKEND=LibreTranslate
+      - LIBRETRANSLATE_URL=http://libretranslate:5000
+      # Delay after each call in each translation worker.
       - LIBRETRANSLATE_BLOCK_DELAY_MS=200
     restart: unless-stopped
 
@@ -139,12 +143,12 @@ services:
     restart: unless-stopped
 ```
 
-**`--req-limit 0`** disables the per-minute request limit — important for long documents where pdf-translate makes many API calls (one per text block).
+**`--req-limit 0`** disables the per-minute request limit — important for long documents where TransPDF makes many API calls (one per text block).
 
 **`--load-only`** restricts which language models are downloaded. Remove it to load all ~50 languages (uses more disk and RAM). First startup takes a few minutes while models download.
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 
 # Monitor startup — wait for "Running on http://0.0.0.0:5000"
 docker compose logs -f libretranslate
@@ -159,7 +163,7 @@ pip install libretranslate
 libretranslate --req-limit 0
 ```
 
-Set the URL to `http://localhost:5000` in pdf-translate.
+Set the URL to `http://localhost:5000` in TransPDF.
 
 ### 🔑 API keys (optional)
 
@@ -193,6 +197,12 @@ For best results, set **Source language** explicitly — avoid Auto-detect with 
 
 No setup required. Uses the unofficial `translate.googleapis.com` endpoint — no API key, no account. Requires internet access.
 
-**Limitations:** your PDF text is sent to Google's servers. Not suitable for confidential documents. No enforced file size limit in pdf-translate, but large documents may hit undocumented Google rate limits.
+**Limitations:** your PDF text is sent to Google's servers. Not suitable for confidential documents. No enforced file size limit in TransPDF, but large documents may hit undocumented Google rate limits.
 
 Use this backend for quick tests or when translating non-sensitive public documents. For anything private, use Ollama or LibreTranslate instead.
+
+## 🔵 Bing Translator (testing / fallback only)
+
+No setup or API key is required. The backend uses Bing's web translator endpoint and refreshes its session token for each text block. It requires internet access and sends PDF text to Bing. Bing's web endpoint accepts up to 1,000 characters per request and may change without notice.
+
+Select **Bing** from **翻译引擎**. Bing has no connection-test button in the current UI. The backend currently truncates blocks to 1,000 characters and treats `auto` as English; choose the source language explicitly and use another backend for longer blocks.

@@ -1,5 +1,5 @@
 """
-pdf-translate — configuration constants and persistence.
+TransPDF — configuration constants and persistence.
 """
 
 import json
@@ -36,7 +36,13 @@ SOURCE_LANGUAGES = [
     ("Filipino",    "tl"),
 ]
 
-TARGET_LANGUAGES = SOURCE_LANGUAGES[1:]  # no Auto-detect
+TARGET_LANGUAGES = [
+    ("中文（简体）" if code == "zh" else label, code)
+    for label, code in SOURCE_LANGUAGES[1:]
+] + [
+    ("中文（繁體，台灣）", "zh-tw"),
+    ("中文（繁體，香港）", "zh-hk"),
+]
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -48,9 +54,42 @@ OLLAMA_DEFAULT_MODEL = "translategemma:latest"
 # the bundled LibreTranslate service is used).
 LIBRE_DEFAULT_URL    = os.environ.get("LIBRETRANSLATE_URL", "http://localhost:5000")
 # Can be overridden by PDF_TRANSLATE_BACKEND env var.
-# Bare Python install: "Google" (no setup needed).
-# Docker with bundled LibreTranslate: set to "LibreTranslate" in docker-compose.
-DEFAULT_BACKEND      = os.environ.get("PDF_TRANSLATE_BACKEND", "Google")
+# Bing is available without an API key, but sends document text externally.
+DEFAULT_BACKEND      = os.environ.get("PDF_TRANSLATE_BACKEND", "Bing")
+
+MAX_TRANSLATION_THREADS = 128
+
+
+def validate_translation_threads(value) -> int:
+    """Accept only whole thread counts within the supported range."""
+    message = f"Translation threads must be an integer between 1 and {MAX_TRANSLATION_THREADS}."
+    if isinstance(value, bool):
+        raise ValueError(message)
+    try:
+        threads = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if isinstance(value, float) and value != threads:
+        raise ValueError(message)
+    if not 1 <= threads <= MAX_TRANSLATION_THREADS:
+        raise ValueError(message)
+    return threads
+
+
+DEFAULT_TRANSLATION_THREADS = validate_translation_threads(
+    os.environ.get("PDF_TRANSLATE_THREADS", "3")
+)
+
+CJK_FONT_FAMILIES = ("auto", "serif", "sans-serif", "wenkai")
+DEFAULT_CJK_FONT_FAMILY = os.environ.get("PDF_TRANSLATE_CJK_FONT_FAMILY", "auto")
+if DEFAULT_CJK_FONT_FAMILY not in CJK_FONT_FAMILIES:
+    DEFAULT_CJK_FONT_FAMILY = "auto"
+
+
+def validate_cjk_font_family(value: str) -> str:
+    if value not in CJK_FONT_FAMILIES:
+        raise ValueError("Chinese font family must be auto, serif, sans-serif, or wenkai.")
+    return value
 
 # OCR defaults — kept in sync with ocr_utils constants (duplicated here to
 # avoid importing ocr_utils at config load time, which would pull in fitz).
@@ -78,12 +117,14 @@ CONFIG_PATH = Path(__file__).parent / "data" / "config.json"
 DEFAULT_CONFIG: dict = {
     "backend":              DEFAULT_BACKEND,
     "source":               "auto",
-    "target":               "en",
+    "target":               "zh",
     "allow_wrap":           False,
     "filter_icons":         True,
     "merge_blocks":         False,
     "detect_tables":        True,
     "force_ocr":            False,
+    "translation_threads":  DEFAULT_TRANSLATION_THREADS,
+    "cjk_font_family":      DEFAULT_CJK_FONT_FAMILY,
     "ollama_url":           OLLAMA_DEFAULT_URL,
     "ollama_model":         OLLAMA_DEFAULT_MODEL,
     "ollama_system_prompt": OLLAMA_DEFAULT_SYSTEM_PROMPT,
@@ -105,9 +146,20 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         try:
             with CONFIG_PATH.open() as f:
-                return {**DEFAULT_CONFIG, **json.load(f)}
+                cfg = {**DEFAULT_CONFIG, **json.load(f)}
+            try:
+                cfg["translation_threads"] = validate_translation_threads(cfg["translation_threads"])
+            except ValueError as exc:
+                print(f"[TransPDF] WARNING: {exc} — using default thread count", flush=True)
+                cfg["translation_threads"] = DEFAULT_TRANSLATION_THREADS
+            try:
+                cfg["cjk_font_family"] = validate_cjk_font_family(cfg["cjk_font_family"])
+            except ValueError as exc:
+                print(f"[TransPDF] WARNING: {exc} — using automatic font selection", flush=True)
+                cfg["cjk_font_family"] = "auto"
+            return cfg
         except Exception as exc:
-            print(f"[pdf-translate] WARNING: failed to load {CONFIG_PATH}: {exc} — using defaults", flush=True)
+            print(f"[TransPDF] WARNING: failed to load {CONFIG_PATH}: {exc} — using defaults", flush=True)
     return dict(DEFAULT_CONFIG)
 
 
@@ -129,6 +181,8 @@ def save_config(
     merge_blocks: bool = False,
     detect_tables: bool = True,
     force_ocr: bool = False,
+    translation_threads: int = DEFAULT_TRANSLATION_THREADS,
+    cjk_font_family: str = DEFAULT_CJK_FONT_FAMILY,
 ) -> str:
     cfg = {
         "backend":              backend,
@@ -139,6 +193,8 @@ def save_config(
         "merge_blocks":         merge_blocks,
         "detect_tables":        detect_tables,
         "force_ocr":            force_ocr,
+        "translation_threads":  validate_translation_threads(translation_threads),
+        "cjk_font_family":      validate_cjk_font_family(cjk_font_family),
         "ollama_url":           ollama_url,
         "ollama_model":         ollama_model,
         "ollama_system_prompt": ollama_system_prompt,
@@ -161,6 +217,8 @@ def update_config(updates: dict) -> None:
     Only keys present in *updates* are changed; all other values are preserved.
     """
     merged = {**load_config(), **updates}
+    merged["translation_threads"] = validate_translation_threads(merged["translation_threads"])
+    merged["cjk_font_family"] = validate_cjk_font_family(merged["cjk_font_family"])
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with CONFIG_PATH.open("w") as f:
         json.dump(merged, f, indent=2)

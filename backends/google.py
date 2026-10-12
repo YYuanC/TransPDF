@@ -1,5 +1,5 @@
 """
-pdf-translate — Google Translate backend.
+TransPDF — Google Translate backend.
 
 Uses the unofficial translate.googleapis.com endpoint — no API key required.
 Not rate-limit-tested for document-sized workloads; use LibreTranslate or
@@ -10,13 +10,17 @@ import httpx
 
 from config import TRANSLATE_TIMEOUT
 
+_LANGUAGE_MAP = {
+    "zh-hk": "zh-TW", "zh-hant": "zh-TW", "zh-hans": "zh-CN",
+}
+
 
 def call(text: str, source: str, target: str) -> str:
     """Translate one text block via the Google Translate unofficial endpoint."""
     params = {
         "client": "gtx",
-        "sl": source,
-        "tl": target,
+        "sl": _LANGUAGE_MAP.get(source.lower().replace("_", "-"), source),
+        "tl": _LANGUAGE_MAP.get(target.lower().replace("_", "-"), target),
         "dt": "t",
         "q": text,
     }

@@ -1,11 +1,12 @@
 """
-pdf-translate — backends package.
+TransPDF — backends package.
 
 Public API (imported by app.py):
   translate(...)               generator dispatcher (Gradio UI)
   translate_sync(...)          synchronous dispatcher (REST API)
   test_ollama_connection(...)  → str
   test_libre_connection(...)   → str
+  test_bing_connection(...)    → str
 
 Adding a new backend
 --------------------
@@ -23,7 +24,7 @@ import threading
 import gradio as gr
 
 import pipeline as _pipeline
-from backends import google, libretranslate, ollama
+from backends import bing, google, libretranslate, ollama
 from config import (
     load_config,
     LIBRE_DEFAULT_URL,
@@ -33,11 +34,13 @@ from config import (
     OCR_DEFAULT_SERVICE,
     OCR_LLM_DEFAULT_MODEL,
     OCR_LLM_DEFAULT_PROMPT,
+    validate_translation_threads,
 )
 
 # Re-export test functions under the names app.py expects
 test_ollama_connection = ollama.test_connection
 test_libre_connection  = libretranslate.test_connection
+test_bing_connection    = bing.test_connection
 
 
 def translate(
@@ -59,6 +62,7 @@ def translate(
     merge_blocks: bool = False,
     detect_tables: bool = True,
     force_ocr: bool = False,
+    translation_threads: int | None = None,
 ):
     """
     Generator dispatcher — builds a call_fn closure per backend, then yields
@@ -67,6 +71,13 @@ def translate(
     """
     if not pdf_path:
         raise gr.Error("Please upload a PDF file.")
+
+    try:
+        threads = validate_translation_threads(
+            load_config()["translation_threads"] if translation_threads is None else translation_threads
+        )
+    except ValueError as exc:
+        raise gr.Error(str(exc)) from exc
 
     ocr_config = {"url": ollama_url, "model": ocr_ollama_model, "prompt": ocr_ollama_prompt}
 
@@ -81,6 +92,9 @@ def translate(
     elif service == "Google":
         call_fn = google.call
         meta = {"service": service, "url": "https://translate.googleapis.com"}
+    elif service == "Bing":
+        call_fn = bing.call
+        meta = {"service": service, "url": "https://www.bing.com/translator"}
     else:
         raise gr.Error(f"Unknown backend: {service}")
 
@@ -89,6 +103,7 @@ def translate(
         meta=meta, ocr_service=ocr_service, ocr_config=ocr_config,
         merge_blocks=merge_blocks, detect_tables=detect_tables,
         force_ocr=force_ocr,
+        translation_threads=threads,
     )
 
 
@@ -112,14 +127,14 @@ def translate_sync(
     merge_blocks: bool = False,
     detect_tables: bool = True,
     force_ocr: bool = False,
+    translation_threads: int | None = None,
 ) -> tuple[str, str, str]:
     """
     Synchronous (non-generator) translation for the REST API.
 
-    All params default to module-level constants when not supplied.
-    config.json is never read — it is UI-only.
-    If cancel_event is set mid-translation, raises InterruptedError after the
-    current block's backend call completes (best-effort cancellation).
+    The global translation thread count and output Chinese font style fall
+    back to config.json; backend settings use module-level defaults. Cancellation stops scheduling new
+    blocks and waits for in-flight calls to finish (best-effort cancellation).
     Returns (translated_pdf_path, sbs_pdf_path, html_path).
     Raises ValueError for unknown backend or empty document.
     """
@@ -146,20 +161,15 @@ def translate_sync(
             return ollama.call(text, src, tgt, url, model, prompt, key)
     elif service == "Google":
         call_fn = google.call
+    elif service == "Bing":
+        call_fn = bing.call
     else:
         raise ValueError(f"Unknown backend: {service!r}")
-
-    # Wrap call_fn with cancellation support — checked between blocks
-    if cancel_event is not None:
-        _raw = call_fn
-        def call_fn(text: str, src: str, tgt: str) -> str:  # noqa: E731
-            if cancel_event.is_set():
-                raise InterruptedError("Translation cancelled.")
-            return _raw(text, src, tgt)
 
     return _pipeline.translate_pdf_sync(
         pdf_path, source_lang, target_lang, service, call_fn, allow_wrap, filter_icons,
         ocr_service=_ocr_service, ocr_config=ocr_cfg,
         merge_blocks=merge_blocks, detect_tables=detect_tables,
         force_ocr=force_ocr,
+        translation_threads=translation_threads, cancel_event=cancel_event,
     )

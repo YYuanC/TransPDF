@@ -1,5 +1,5 @@
 """
-pdf-translate — PDF utilities.
+TransPDF — PDF utilities.
 
 Covers:
   prescan_blocks            extract translatable text blocks from a PDF
@@ -10,6 +10,7 @@ Covers:
 """
 
 import html as _html
+import logging
 import tempfile
 import unicodedata
 from datetime import datetime
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
-from fonts import extract_doc_fonts, normalize_font_name, resolve_font, _BASE14, _family_from_name, _span_style
+from fonts import extract_doc_fonts, normalize_font_name, resolve_font, unicode_fallback_font, glyph_fallback_font
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -29,6 +30,7 @@ RENDER_DPI     = 150   # DPI for image background in translated PDF
 RIGHT_MARGIN   = 10    # pts gap between expanded right edge and page boundary
 DEBUG_FONTS    = False  # Set True to print per-page font registry to console
 DEBUG_PRESCAN  = False  # Set True to print every block's font name + text during prescan
+_LOG = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +73,7 @@ def _visible_chars(text: str) -> str:
     return "".join(c for c in text if unicodedata.category(c) not in skip)
 
 
-def _has_translatable_text(text: str, font_name: str = "") -> bool:
+def _has_translatable_text(text: str, font_name: str = "", allow_single_char: bool = False) -> bool:
     """Return False for blocks that should not be sent to a translation backend.
 
     Skips:
@@ -84,9 +86,11 @@ def _has_translatable_text(text: str, font_name: str = "") -> bool:
     - Blocks from known symbol/icon fonts (font name check).
     - Blocks containing only emoji, symbols, or digits — no Unicode letter.
     Mixed content (letters + real emoji) passes through as-is.
+    allow_single_char permits short translations such as Chinese "是" at the
+    write step; source prescanning still filters single-character decorators.
     """
     visible = _visible_chars(text)
-    if len(visible) <= 1:
+    if not visible or (len(visible) == 1 and not allow_single_char):
         return False
     if any(0xE000 <= ord(c) <= 0xF8FF for c in visible):
         return False  # Private Use Area glyph — icon font
@@ -364,6 +368,8 @@ def write_translated_pdf(
     page_translations: list[list[tuple]],
     out_path: str,
     embedded_fonts: dict[str, bytes],
+    target_lang: str = "",
+    cjk_font_family: str = "auto",
 ) -> None:
     """
     Write a translated PDF: image background + white rects + translated text.
@@ -395,30 +401,44 @@ def write_translated_pdf(
         new_page.insert_image(fitz.Rect(0, 0, w, h), pixmap=bg_pix)
 
         # Build per-page font registry
-        page_font_registry: dict[tuple, tuple[str, str]] = {}
-        for *_, fontsize, orig_font_name, flags, _is_tc in translations:
-            key = (normalize_font_name(orig_font_name), flags)
-            if key in page_font_registry:
+        page_font_registry: dict[str, str] = {}
+        block_fonts: list[str | None] = []
+        block_fallback_fonts: list[fitz.Font | None] = []
+        for *_, translated, fontsize, orig_font_name, flags, _is_tc in translations:
+            if not _has_translatable_text(translated, orig_font_name, allow_single_char=True):
+                block_fonts.append(None)
+                block_fallback_fonts.append(None)
                 continue
-            alias, font_bytes = resolve_font(orig_font_name, flags, embedded_fonts)
+            alias, font_bytes = resolve_font(
+                orig_font_name, flags, embedded_fonts, text=translated,
+                target_lang=target_lang, cjk_font_family=cjk_font_family,
+            )
             tier = "base14"
             if font_bytes is not None:
                 norm_check = normalize_font_name(orig_font_name)
-                tier = "embedded" if norm_check in embedded_fonts else "liberation"
-                try:
-                    new_page.insert_font(fontname=alias, fontbuffer=font_bytes)
-                except Exception:
-                    # Registration failed — fall back to base14
-                    is_bold, is_italic = _span_style(normalize_font_name(orig_font_name), flags)
-                    fam   = _family_from_name(normalize_font_name(orig_font_name))
-                    alias = _BASE14.get(fam, _BASE14["sans"]).get((is_bold, is_italic), "helv")
-                    tier  = "base14(fallback)"
-            page_font_registry[key] = (alias, tier)
+                if alias.startswith(("sourcehan_", "wenkai_")):
+                    tier = "chinese"
+                else:
+                    tier = "unicode" if alias == "unicode_cjk" else (
+                        "embedded" if norm_check in embedded_fonts else "liberation"
+                    )
+                if alias not in page_font_registry:
+                    try:
+                        new_page.insert_font(fontname=alias, fontbuffer=font_bytes)
+                    except Exception:
+                        # Keep glyph coverage even if source font registration fails.
+                        alias, font_bytes = unicode_fallback_font(translated)
+                        if alias not in page_font_registry:
+                            new_page.insert_font(fontname=alias, fontbuffer=font_bytes)
+                        tier = "unicode(fallback)"
+            page_font_registry[alias] = tier
+            block_fonts.append(alias)
+            block_fallback_fonts.append(glyph_fallback_font(alias, font_bytes, translated))
 
         if DEBUG_FONTS:
-            print(f"\n[pdf-translate] Page {i + 1} font registry:")
-            for (norm, flg), (a, t) in page_font_registry.items():
-                print(f"  '{norm}' flags={flg:#06x} → alias='{a}' tier={t}")
+            print(f"\n[TransPDF] Page {i + 1} font registry:")
+            for alias, tier in page_font_registry.items():
+                print(f"  alias='{alias}' tier={tier}")
 
         def _clear(rect: fitz.Rect) -> None:
             s = new_page.new_shape()
@@ -426,17 +446,54 @@ def write_translated_pdf(
             s.finish(fill=(1, 1, 1), color=(1, 1, 1))
             s.commit()
 
+        def _insert_textbox(rect: fitz.Rect, text: str, **kwargs) -> float:
+            if fallback_font is None:
+                return new_page.insert_textbox(rect, text, **kwargs)
+            # Page.insert_textbox uses a single font; TextWriter embeds separate
+            # fallback fonts for symbols such as U+2212 while keeping Chinese.
+            size = kwargs["fontsize"]
+            baseline = rect.y0 + size * fallback_font.ascender
+            if baseline - size * fallback_font.descender > rect.y1:
+                return -1.0
+            writer = fitz.TextWriter(new_page.rect)
+            fit_rect = fitz.Rect(rect)
+            # fill_textbox fits baselines; reserve space for the last descender.
+            fit_rect.y1 += size * fallback_font.descender
+            try:
+                writer.fill_textbox(
+                    fit_rect, text, font=fallback_font, fontsize=size,
+                    pos=(rect.x0, baseline), align=kwargs.get("align", 0), warn=False,
+                )
+            except ValueError:
+                # Discard the trial writer so an unsuccessful fit paints nothing.
+                return -1.0
+            writer.write_text(new_page, color=kwargs.get("color", (0, 0, 0)))
+            return 0.0
+
+        def _insert_text(pos: tuple, text: str, **kwargs) -> None:
+            if fallback_font is None:
+                new_page.insert_text(pos, text, **kwargs)
+                return
+            writer = fitz.TextWriter(new_page.rect)
+            size = kwargs["fontsize"]
+            line_height = size * max(1.2, fallback_font.ascender - fallback_font.descender)
+            for line_num, line in enumerate(text.splitlines()):
+                writer.append(
+                    (pos[0], pos[1] + line_num * line_height), line,
+                    font=fallback_font, fontsize=size,
+                )
+            writer.write_text(new_page, color=kwargs.get("color", (0, 0, 0)))
+
         # Render each block
-        for x0, y0, x1, y1, translated, fontsize, orig_font_name, flags, is_table_cell in translations:
+        for block, alias, fallback_font in zip(translations, block_fonts, block_fallback_fonts):
+            x0, y0, x1, y1, translated, fontsize, orig_font_name, flags, is_table_cell = block
             # Safety net: if this block was not filtered at prescan time but
             # the translated text is still icon/symbol content, skip it
             # entirely.  No white rect is drawn so the background image
             # (original page render) shows through with the original glyph.
-            if not _has_translatable_text(translated, orig_font_name):
+            if alias is None:
                 continue
 
-            key      = (normalize_font_name(orig_font_name), flags)
-            alias, _ = page_font_registry[key]
             orig_rect = fitz.Rect(x0, y0, x1, y1)
             block_h   = y1 - y0
 
@@ -448,7 +505,7 @@ def write_translated_pdf(
                 inserted = False
                 for scale in (1.0, 0.85, 0.70, 0.55, 0.40):
                     try_size = max(round(fontsize * scale, 1), 6.0)
-                    rc = new_page.insert_textbox(
+                    rc = _insert_textbox(
                         orig_rect, translated,
                         fontsize=try_size, fontname=alias, color=(0, 0, 0), align=0,
                     )
@@ -456,7 +513,7 @@ def write_translated_pdf(
                         inserted = True
                         break
                 if not inserted:
-                    new_page.insert_text(
+                    _insert_text(
                         (x0, y0 + 6.0), translated,
                         fontsize=6.0, fontname=alias, color=(0, 0, 0),
                     )
@@ -471,7 +528,7 @@ def write_translated_pdf(
                 inserted = False
 
                 if has_right_space:
-                    rc = new_page.insert_textbox(
+                    rc = _insert_textbox(
                         right_rect, translated,
                         fontsize=fontsize, fontname=alias, color=(0, 0, 0), align=0,
                     )
@@ -479,7 +536,7 @@ def write_translated_pdf(
                         inserted = True
 
                 if not inserted:
-                    rc = new_page.insert_textbox(
+                    rc = _insert_textbox(
                         orig_rect, translated,
                         fontsize=fontsize, fontname=alias, color=(0, 0, 0), align=0,
                     )
@@ -494,7 +551,7 @@ def write_translated_pdf(
                     for mult in (1.5, 2.0, 3.0, 5.0):
                         try_rect = fitz.Rect(x0, y0, expand_x1, y0 + block_h * mult)
                         _clear(try_rect)
-                        rc = new_page.insert_textbox(
+                        rc = _insert_textbox(
                             try_rect, translated,
                             fontsize=fontsize, fontname=alias, color=(0, 0, 0), align=0,
                         )
@@ -503,13 +560,19 @@ def write_translated_pdf(
                             break
 
                 if not inserted:
-                    new_page.insert_text(
+                    _insert_text(
                         (x0, y0 + fontsize), translated,
                         fontsize=fontsize, fontname=alias, color=(0, 0, 0),
                     )
 
     orig_doc.close()
-    out_doc.save(out_path)
+    # CJK fonts contain many thousands of glyphs. Embed only the glyphs used in
+    # this document; keep the complete fonts if the optional optimisation fails.
+    try:
+        out_doc.subset_fonts(fallback=False)
+    except Exception as exc:
+        _LOG.warning("Font subsetting failed; saving complete embedded fonts: %s", exc)
+    out_doc.save(out_path, deflate=True)
     out_doc.close()
 
 

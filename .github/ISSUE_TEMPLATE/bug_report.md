@@ -20,7 +20,7 @@ What you expected instead.
 
 ## Environment
 
-- **pdf-translate version:** (run `curl http://localhost:7860/api/health` and check `version`)
+- **TransPDF version:** (run `curl http://localhost:7860/api/health` and check `version`)
 - **Backend:** Google / Ollama / LibreTranslate
 - **Deployment:** Docker / Python local
 - **OS:** Windows / Linux / macOS

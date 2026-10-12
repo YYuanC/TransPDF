@@ -1,18 +1,25 @@
 """
-pdf-translate — font resolution.
+TransPDF — font resolution.
 
-Three-tier strategy for every translated text block:
+Font strategy for every translated text block:
+  Chinese text uses regional Source Han Serif / Sans, including real bold.
+  WenKai is an optional reading style for regular Chinese text.
+  Other text keeps the source / Liberation / Base14 selection below.
   1. Embedded in the source PDF — full fonts only (subset fonts skipped;
      hash/obfuscated names skipped — both are glyph-limited).
   2. Bundled Liberation TTF that matches the font family and style.
   3. Base14 fallback (helv/hebo/heit/hebi, tiro/…, cour/…).
+  Translated text is checked for glyph coverage; unsupported characters use
+  PyMuPDF's bundled Droid Sans Fallback, embedded in the output PDF.
 
 Public API:
   extract_doc_fonts(doc)             → {norm_name: bytes}
-  resolve_font(orig_name, flags, embedded_fonts) → (alias, bytes | None)
+  resolve_font(orig_name, flags, embedded_fonts, text="") → (alias, bytes | None)
 """
 
 import re
+import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -58,9 +65,11 @@ _LIBERATION: dict[str, dict[tuple[bool, bool], str]] = {
 # Font name substrings → family (first match wins)
 _FAMILY_KEYWORDS: dict[str, list[str]] = {
     "sans":  ["arial", "helvetica", "verdana", "tahoma", "calibri",
-              "trebuchet", "futura", "gill", "frank"],
+              "trebuchet", "futura", "gill", "frank", "sans", "simhei",
+              "heiti", "yahei", "pingfang", "gothic"],
     "serif": ["times", "georgia", "garamond", "palatino", "baskerville",
-              "caslon", "minion", "cambria"],
+              "caslon", "minion", "cambria", "serif", "simsun", "songti",
+              "mingliu", "mincho"],
     "mono":  ["courier", "consolas", "lucida", "monaco", "menlo",
               "inconsolata", "mono", "typewriter"],
 }
@@ -93,11 +102,16 @@ def normalize_font_name(name: str) -> str:
     return name.lower().strip()
 
 
-def _family_from_name(norm: str) -> str:
+def _family_from_name(norm: str, flags: int = 0) -> str:
     """Map a normalised font name to 'sans', 'serif', or 'mono'. Default: 'sans'."""
     for family, keywords in _FAMILY_KEYWORDS.items():
         if any(kw in norm for kw in keywords):
             return family
+    # PDF span flags retain useful style information for obfuscated font names.
+    if flags & 8:
+        return "mono"
+    if flags & 4:
+        return "serif"
     return "sans"
 
 
@@ -158,7 +172,7 @@ def extract_doc_fonts(doc: fitz.Document) -> dict[str, bytes]:
     return result
 
 
-def resolve_font(
+def _resolve_preferred_font(
     orig_name: str,
     flags: int,
     embedded_fonts: dict[str, bytes],
@@ -174,12 +188,13 @@ def resolve_font(
     norm    = normalize_font_name(orig_name)
     is_bold, is_italic = _span_style(norm, flags)
     variant = (is_bold, is_italic)
-    family  = _family_from_name(norm)
+    family  = _family_from_name(norm, flags)
 
     # Tier 1: embedded full font with a recognisable name
     is_recognizable = any(kw in norm for kw in _ALL_FONT_KEYWORDS)
     if norm in embedded_fonts and is_recognizable:
-        alias = re.sub(r"[^a-zA-Z0-9]", "", norm)[:20] or "emb"
+        # Avoid reserved Base14 names: insert_font ignores their font buffers.
+        alias = "emb_" + (re.sub(r"[^a-zA-Z0-9]", "", norm)[:20] or "font")
         return alias, embedded_fonts[norm]
 
     # Tier 2: bundled Liberation TTF
@@ -194,3 +209,141 @@ def resolve_font(
     # Tier 3: base14 fallback
     base14 = _BASE14.get(family, _BASE14["sans"]).get(variant, "helv")
     return base14, None
+
+
+@lru_cache(maxsize=32)
+def _measurement_font(alias: str, font_bytes: bytes | None) -> fitz.Font:
+    """Reuse font objects for coverage checks across blocks and pages."""
+    if font_bytes is not None:
+        return fitz.Font(fontbuffer=font_bytes)
+    return fitz.Font(fontname=alias)
+
+
+def _missing_glyphs(font: fitz.Font, text: str) -> set[str]:
+    # Whitespace and formatting controls do not require visible glyphs.
+    return {
+        char for char in set(text)
+        if not char.isspace() and unicodedata.category(char) not in ("Cc", "Cf")
+        and not font.has_glyph(ord(char), fallback=False)
+    }
+
+
+@lru_cache(maxsize=1)
+def _unicode_font_data() -> tuple[fitz.Font, bytes]:
+    font = fitz.Font("cjk")
+    return font, font.buffer
+
+
+def unicode_fallback_font(text: str = "") -> tuple[str, bytes]:
+    """Return the embedded CJK font; supplemental symbols use TextWriter fallback.
+
+    No single font covers all Unicode. Missing symbols must not abort an entire
+    PDF export just because this primary CJK font does not contain them.
+    """
+    _, font_bytes = _unicode_font_data()
+    return "unicode_cjk", font_bytes
+
+
+def glyph_fallback_font(alias: str, font_bytes: bytes | None, text: str) -> fitz.Font | None:
+    """Use TextWriter's automatic supplemental fonts only for uncovered glyphs."""
+    font = _measurement_font(alias, font_bytes)
+    # Base14 page insertion uses an 8-bit encoding even when Font.has_glyph
+    # reports a glyph for a Unicode symbol. TextWriter handles that encoding.
+    needs_unicode_encoding = font_bytes is None and any(ord(char) > 255 for char in text)
+    return font if needs_unicode_encoding or _missing_glyphs(font, text) else None
+
+
+def _has_han_characters(text: str) -> bool:
+    """Recognise Han ideographs without treating Japanese kana as Chinese."""
+    return any(
+        0x3400 <= ord(char) <= 0x4DBF or 0x4E00 <= ord(char) <= 0x9FFF
+        or 0xF900 <= ord(char) <= 0xFAFF or 0x20000 <= ord(char) <= 0x323AF
+        for char in text
+    )
+
+
+def _chinese_region(target_lang: str) -> str:
+    """Select locale-specific glyphs; generic Traditional Chinese uses TW."""
+    language = target_lang.lower().replace("_", "-")
+    if "hk" in language or "mo" in language:
+        return "HK"
+    if "tw" in language or "hant" in language:
+        return "TW"
+    return "CN"
+
+
+def _resolve_chinese_font(
+    orig_name: str, flags: int, target_lang: str, cjk_font_family: str,
+) -> tuple[str, bytes] | None:
+    norm = normalize_font_name(orig_name)
+    family = _family_from_name(norm, flags)
+    bold, _ = _span_style(norm, flags)
+    region = _chinese_region(target_lang)
+    style = "serif" if family == "serif" else "sans"
+    if cjk_font_family in ("serif", "sans-serif"):
+        style = "serif" if cjk_font_family == "serif" else "sans"
+
+    candidates: list[tuple[str, str]] = []
+    if cjk_font_family == "wenkai" and not bold:
+        # WenKai has no bundled bold: retain real Source Han bold for headings.
+        script_region = "GB" if region == "CN" else "TC"
+        candidates.append((
+            f"wenkai_{script_region.lower()}",
+            f"LXGWWenKai{script_region}-Regular.1.520.ttf",
+        ))
+    weight = "Bold" if bold else "Regular"
+    font_family = "Serif" if style == "serif" else "Sans"
+    candidates.append((
+        f"sourcehan_{style}_{region.lower()}_{'b' if bold else 'r'}",
+        f"SourceHan{font_family}{region}-{weight}.ttf",
+    ))
+    for alias, filename in candidates:
+        path = FONTS_DIR / filename
+        if not path.exists():
+            continue
+        try:
+            data = _load_font_bytes(path)
+            _measurement_font(alias, data)
+            return alias, data
+        except Exception:
+            # A partial installation should still be able to export via Droid.
+            continue
+    return None
+
+
+def resolve_font(
+    orig_name: str,
+    flags: int,
+    embedded_fonts: dict[str, bytes],
+    text: str = "",
+    target_lang: str = "",
+    cjk_font_family: str = "auto",
+) -> tuple[str, bytes | None]:
+    """Preserve source style when possible, with glyph coverage for translated text.
+
+    Pass the actual translation so a Latin source font cannot turn Chinese
+    characters into missing-glyph boxes. Font buffers must be registered on the
+    output page before inserting text. Omitting text retains the legacy API.
+    """
+    language = target_lang.lower().replace("_", "-")
+    has_han = _has_han_characters(text)
+    is_chinese = language == "zh" or language.startswith("zh-")
+    if has_han and (not language or is_chinese):
+        chinese_font = _resolve_chinese_font(orig_name, flags, target_lang, cjk_font_family)
+        if chinese_font is not None:
+            return chinese_font
+        return unicode_fallback_font(text)
+
+    alias, font_bytes = _resolve_preferred_font(orig_name, flags, embedded_fonts)
+    if text:
+        try:
+            missing = _missing_glyphs(_measurement_font(alias, font_bytes), text)
+            if not missing or not has_han:
+                # Keep Latin styling even when a few symbols need TextWriter
+                # fallback, rather than replacing the whole block with Droid.
+                return alias, font_bytes
+        except Exception:
+            # Invalid source fonts must not silently degrade Chinese to Base14.
+            pass
+        return unicode_fallback_font(text)
+    return alias, font_bytes

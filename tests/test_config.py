@@ -37,6 +37,8 @@ class TestLoadConfig:
             "merge_blocks": True,
             "detect_tables": False,
             "force_ocr": True,
+            "translation_threads": 24,
+            "cjk_font_family": "auto",
             "ollama_url": "http://10.0.0.1:11434",
             "ollama_model": "mymodel:latest",
             "ollama_system_prompt": "Translate: {text}",

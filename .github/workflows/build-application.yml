@@ -1,0 +1,83 @@
+name: Build application
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: macos
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Write build version
+        shell: bash
+        run: git describe --tags --always > VERSION
+
+      - name: Build executable
+        shell: bash
+        run: |
+          # PyInstaller uses ';' on Windows and ':' on Unix-like systems for
+          # the source:destination separator in --add-data.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            data_separator=';'
+          else
+            data_separator=':'
+          fi
+
+          pyinstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --name TransPDF \
+            --collect-all gradio \
+            --collect-all gradio_client \
+            --exclude-module PyQt5 \
+            --exclude-module PyQt6 \
+            --exclude-module PySide2 \
+            --exclude-module PySide6 \
+            --add-data "fonts${data_separator}fonts" \
+            --add-data "icon.svg${data_separator}." \
+            --add-data "VERSION${data_separator}." \
+            app.py
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: TransPDF-${{ matrix.platform }}
+          path: dist/TransPDF
+          if-no-files-found: error
+          retention-days: 14

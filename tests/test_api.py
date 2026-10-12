@@ -380,9 +380,10 @@ class TestTranslate:
                     data={"source": "en", "target": "nl"},
                 )
         assert r.status_code == 200
-        mock_rmtree.assert_called_once()
-        cleaned_path = mock_rmtree.call_args[0][0]
-        assert str(tmp_path) in cleaned_path
+        # Both uploaded PDFs and generated outputs have separate temp folders.
+        cleaned_paths = [call.args[0] for call in mock_rmtree.call_args_list]
+        assert str(tmp_path) in cleaned_paths
+        assert len(cleaned_paths) == 2
 
     def test_processing_options_forwarded(self, reset_job, minimal_pdf, tmp_path):  # noqa: E301
         """merge_blocks, detect_tables, force_ocr values are forwarded to translate_sync."""

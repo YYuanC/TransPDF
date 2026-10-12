@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+import backends.bing as bing
 import backends.google as google
 import backends.libretranslate as libre
 import backends.ollama as ollama
@@ -55,6 +56,82 @@ class TestGoogleCall:
         with patch("httpx.get", return_value=fake_resp):
             with pytest.raises(httpx.HTTPStatusError):
                 google.call("hello", "en", "nl")
+
+
+# ---------------------------------------------------------------------------
+# Bing backend
+# ---------------------------------------------------------------------------
+
+class TestBingCall:
+    _HTML = (
+        '"ig":"abc123" data-iid="translator.5023" '
+        'params_AbusePreventionHelper = [12345,"token-value",'
+    )
+
+    def _client(self, post_response):
+        page = _mock_response()
+        page.url = "https://www.bing.com/translator"
+        page.text = self._HTML
+        client = MagicMock()
+        client.get.return_value = page
+        client.post.return_value = post_response
+        manager = MagicMock()
+        manager.__enter__.return_value = client
+        manager.__exit__.return_value = False
+        return manager, client
+
+    def test_success_extracts_translation_and_normalizes_languages(self):
+        result_response = _mock_response(
+            json_data=[{"translations": [{"text": "你好"}]}]
+        )
+        manager, client = self._client(result_response)
+        with patch("backends.bing.httpx.Client", return_value=manager):
+            result = bing.call("hello", "en", "zh")
+        assert result == "你好"
+        payload = client.post.call_args.kwargs["data"]
+        assert payload["fromLang"] == "en"
+        assert payload["to"] == "zh-Hans"
+        assert payload["text"] == "hello"
+
+    def test_text_is_limited_to_bing_maximum(self):
+        result_response = _mock_response(
+            json_data=[{"translations": [{"text": "ok"}]}]
+        )
+        manager, client = self._client(result_response)
+        with patch("backends.bing.httpx.Client", return_value=manager):
+            bing.call("x" * 1200, "auto", "zh-tw")
+        payload = client.post.call_args.kwargs["data"]
+        assert len(payload["text"]) == 1000
+        assert payload["fromLang"] == "en"
+        assert payload["to"] == "zh-Hant"
+
+    def test_retries_when_bing_request_fails(self):
+        failed = _mock_response(status_code=503)
+        failed.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "unavailable", request=MagicMock(), response=failed
+        )
+        ok = _mock_response(json_data=[{"translations": [{"text": "ok"}]}])
+        manager, client = self._client(ok)
+        # Supply a valid discovery page for every attempt; the POST fails first.
+        page = _mock_response()
+        page.url = "https://www.bing.com/translator"
+        page.text = self._HTML
+        client.get.side_effect = [page, page, page, page, page]
+        client.post.side_effect = [failed, failed, failed, failed, ok]
+        with patch("backends.bing.httpx.Client", return_value=manager), patch("time.sleep"):
+            assert bing.call("hello", "en", "nl") == "ok"
+        assert client.post.call_count == 5
+
+
+class TestBingConnection:
+    def test_connection_success(self):
+        manager = MagicMock()
+        manager.__enter__.return_value = MagicMock()
+        manager.__enter__.return_value.get.return_value = _mock_response()
+        manager.__exit__.return_value = False
+        with patch("backends.bing.httpx.Client", return_value=manager):
+            result = bing.test_connection()
+        assert "✓" in result
 
 
 # ---------------------------------------------------------------------------

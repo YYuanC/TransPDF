@@ -1,5 +1,5 @@
 """
-pdf-translate — shared translation pipeline.
+TransPDF — shared translation pipeline.
 
 translate_pdf_generic is the single generator that all backends delegate to.
 It owns: prescan → progress reporting → block-by-block translation → output writing.
@@ -10,18 +10,23 @@ closure and does `yield from pipeline.translate_pdf_generic(...)`.
 
 import os
 import tempfile
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
 import gradio as gr
 
+from config import load_config, validate_translation_threads
+
 _DEBUG = os.environ.get("PDF_TRANSLATE_DEBUG", "").lower() in ("1", "true", "yes")
 
-# Delay between LibreTranslate API calls in milliseconds.
-# Prevents 429 / rate-limit errors on self-hosted LibreTranslate instances.
+# Delay after each LibreTranslate call in each worker, in milliseconds.
+# Reduces request rate on self-hosted LibreTranslate instances.
 # Only applied when the LibreTranslate backend is active.
-# Set to 0 to disable.  Default: 200 ms (~5 req/s).
+# Set to 0 to disable. Default: 200 ms (at most ~5 req/s per worker).
 _LIBRE_BLOCK_DELAY_MS = int(os.environ.get("LIBRETRANSLATE_BLOCK_DELAY_MS", "200"))
 
 # Directory for debug log files — same as the config/data directory.
@@ -62,10 +67,10 @@ class _DebugLog:
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.path = _DATA_DIR / f"debug_{ts}_{stem}.log"
         self._f = self.path.open("w", encoding="utf-8")
-        self._write(f"=== pdf-translate debug log ===")
+        self._write(f"=== TransPDF debug log ===")
         self._write(f"file    : {stem}")
         self._write(f"service : {service}  {source} → {target}")
-        self._write(f"delay   : {_LIBRE_BLOCK_DELAY_MS} ms (LibreTranslate only)")
+        self._write(f"delay   : {_LIBRE_BLOCK_DELAY_MS} ms per worker (LibreTranslate only)")
         ocr_label = ocr_service
         if ocr_service == "Ollama" and ocr_config:
             ocr_label = f"Ollama ({ocr_config.get('model', '?')})"
@@ -129,6 +134,76 @@ def _prog(orig_image: str, msg: str) -> tuple:
     )
 
 
+def _iter_translated_blocks(
+    page_blocks: list[list[tuple]],
+    source: str,
+    target: str,
+    service: str,
+    call_fn,
+    allow_wrap: bool,
+    translation_threads: int,
+    cancel_event: threading.Event | None = None,
+    log: _DebugLog | None = None,
+):
+    """Translate with bounded concurrency; return each block's original indices.
+
+    Workers only handle text/backend calls. PDF operations and logging stay
+    on the caller's thread. At most translation_threads tasks are in flight.
+    """
+    stopped = threading.Event()
+
+    def check_cancelled():
+        if stopped.is_set() or (cancel_event is not None and cancel_event.is_set()):
+            raise InterruptedError("Translation cancelled.")
+
+    def translate_block(block):
+        check_cancelled()
+        result = _translate_one_block(block, source, target, service, call_fn, allow_wrap)
+        check_cancelled()
+        return result
+
+    blocks = iter(
+        (p, i, block)
+        for p, page in enumerate(page_blocks)
+        for i, block in enumerate(page)
+    )
+    executor = ThreadPoolExecutor(
+        max_workers=translation_threads, thread_name_prefix="TransPDF"
+    )
+    pending = {}
+
+    def submit_next():
+        check_cancelled()
+        item = next(blocks, None)
+        if item is not None:
+            p, i, block = item
+            pending[executor.submit(translate_block, block)] = (p, i)
+
+    try:
+        for _ in range(translation_threads):
+            submit_next()
+        while pending:
+            check_cancelled()
+            completed, _ = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+            for future in completed:
+                p, i = pending.pop(future)
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    if log:
+                        log.log(f"[error] p{p+1} block {i+1}: {exc}")
+                    raise
+                check_cancelled()
+                yield p, i, result
+            # Inspect all completed results for failures before adding work.
+            for _ in completed:
+                submit_next()
+        check_cancelled()
+    finally:
+        stopped.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
 def _build_outputs(
     pdf_path: str,
     page_blocks: list[list[tuple]],
@@ -149,7 +224,10 @@ def _build_outputs(
     sbs_pdf_path        = str(tmp_dir / f"{stem}_{source}_{target}.pdf")
     html_path           = str(tmp_dir / f"{stem}_{source}_{target}.html")
 
-    write_translated_pdf(pdf_path, page_translations, translated_pdf_path, embedded_fonts)
+    write_translated_pdf(
+        pdf_path, page_translations, translated_pdf_path, embedded_fonts,
+        target_lang=target, cjk_font_family=load_config()["cjk_font_family"],
+    )
     html_content = generate_side_by_side_html(
         source, target, page_blocks, page_translations, stem=stem, meta=meta,
     )
@@ -179,6 +257,7 @@ def translate_pdf_generic(
     merge_blocks: bool = False,
     detect_tables: bool = True,
     force_ocr: bool = False,
+    translation_threads: int | None = None,
 ):
     """
     Generic PDF translation generator shared by all backends.
@@ -192,6 +271,9 @@ def translate_pdf_generic(
        page_state_reset, page_indicator, translated_path_state,
        prev_btn_update, next_btn_update)
     """
+    threads = validate_translation_threads(
+        load_config()["translation_threads"] if translation_threads is None else translation_threads
+    )
     orig_image = pdf_to_image(pdf_path)
     stem       = Path(pdf_path).stem
 
@@ -245,39 +327,32 @@ def translate_pdf_generic(
                 fonts = {b[6] for b in pblocks}
                 _status(f"[debug] p{pi+1} fontsize={min(sizes):.1f}–{max(sizes):.1f}  fonts={fonts}")
 
-    found_msg = f"Found {total_blocks} block(s) across {n_pages} page(s). Starting…"
+    found_msg = f"Found {total_blocks} block(s) across {n_pages} page(s). Starting with {threads} thread(s)…"
     yield _prog(orig_image, found_msg)
     _status(found_msg)
 
     done = 0
-    page_translations: list[list[tuple]] = []
+    page_translations = [list(blocks) for blocks in page_blocks]
 
-    for p, blocks in enumerate(page_blocks):
-        translated_blocks: list[tuple] = []
-        for i, block in enumerate(blocks):
-            x0, y0, x1, y1, text, fontsize, orig_font_name, flags, is_table_cell = block
-            done += 1
-            remaining = total_blocks - done
-            prog_msg = f"Page {p + 1}/{n_pages} — block {i + 1}/{len(blocks)} ({remaining} remaining)"
-            yield _prog(orig_image, prog_msg)
-            if _DEBUG:
-                _status(f"{prog_msg}  size={fontsize:.1f}  font={orig_font_name!r}  text={repr(text[:50])}")
-            else:
-                _status(prog_msg)
-
-            try:
-                translated_block = _translate_one_block(
-                    block, source, target, service, call_fn, allow_wrap
-                )
-            except Exception as exc:
-                err_msg = f"[error] p{p+1} block {i+1}: {exc}"
-                if log:
-                    log.log(err_msg)
+    try:
+        with closing(_iter_translated_blocks(
+            page_blocks, source, target, service, call_fn, allow_wrap, threads, log=log,
+        )) as results:
+            for p, i, translated_block in results:
+                page_translations[p][i] = translated_block
+                block = page_blocks[p][i]
+                done += 1
+                remaining = total_blocks - done
+                prog_msg = f"Page {p + 1}/{n_pages} — block {i + 1}/{len(page_blocks[p])} ({remaining} remaining)"
+                yield _prog(orig_image, prog_msg)
                 if _DEBUG:
-                    yield _prog(orig_image, err_msg)
-                raise
-            translated_blocks.append(translated_block)
-        page_translations.append(translated_blocks)
+                    _status(f"{prog_msg}  size={block[5]:.1f}  font={block[6]!r}  text={repr(block[4][:50])}")
+                else:
+                    _status(prog_msg)
+    except BaseException:
+        if log:
+            log.close("ABORTED during translation")
+        raise
 
     writing_msg = "Writing outputs…"
     yield _prog(orig_image, writing_msg)
@@ -327,6 +402,8 @@ def translate_pdf_sync(
     merge_blocks: bool = False,
     detect_tables: bool = True,
     force_ocr: bool = False,
+    translation_threads: int | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[str, str, str]:
     """
     Synchronous PDF translation for the REST API.
@@ -335,6 +412,11 @@ def translate_pdf_sync(
     Returns (translated_pdf_path, sbs_pdf_path, html_path).
     Raises ValueError if no translatable text blocks are found.
     """
+    threads = validate_translation_threads(
+        load_config()["translation_threads"] if translation_threads is None else translation_threads
+    )
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Translation cancelled.")
     stem = Path(pdf_path).stem
     log = _DebugLog(stem, service, source, target, ocr_service=ocr_service, ocr_config=ocr_config) if _DEBUG else None
 
@@ -342,6 +424,7 @@ def translate_pdf_sync(
     ocr_lang = source_lang_to_tesseract(source)
 
     if log:
+        log.log(f"Translation threads: {threads}")
         _ocr_label = ocr_service
         if ocr_service == "Ollama" and ocr_config:
             _ocr_label = f"Ollama ({ocr_config.get('model', '?')})"
@@ -376,24 +459,21 @@ def translate_pdf_sync(
                 fonts = {b[6] for b in pblocks}
                 log.log(f"[prescan] p{pi+1} fontsize={min(sizes):.1f}–{max(sizes):.1f}  fonts={fonts}")
 
-    page_translations: list[list[tuple]] = []
-    for p, blocks in enumerate(page_blocks):
-        translated_blocks: list[tuple] = []
-        for i, block in enumerate(blocks):
-            x0, y0, x1, y1, text, fontsize, orig_font_name, flags, is_table_cell = block
-            if log:
-                log.log(f"p{p+1} block {i+1}/{len(blocks)}  size={fontsize:.1f}  font={orig_font_name!r}  text={repr(text[:40])}")
-            try:
-                translated_block = _translate_one_block(
-                    block, source, target, service, call_fn, allow_wrap
-                )
-            except Exception as exc:
+    page_translations = [list(blocks) for blocks in page_blocks]
+    try:
+        with closing(_iter_translated_blocks(
+            page_blocks, source, target, service, call_fn, allow_wrap, threads,
+            cancel_event=cancel_event, log=log,
+        )) as results:
+            for p, i, translated_block in results:
+                page_translations[p][i] = translated_block
                 if log:
-                    log.log(f"[error] p{p+1} block {i+1}: {exc}")
-                    log.close("ABORTED on error")
-                raise
-            translated_blocks.append(translated_block)
-        page_translations.append(translated_blocks)
+                    block = page_blocks[p][i]
+                    log.log(f"p{p+1} block {i+1}/{len(page_blocks[p])}  size={block[5]:.1f}  font={block[6]!r}  text={repr(block[4][:40])}")
+    except BaseException:
+        if log:
+            log.close("ABORTED during translation")
+        raise
 
     translated_pdf_path, sbs_pdf_path, reading_pdf_path, _ = _build_outputs(
         pdf_path, page_blocks, page_translations, source, target, stem, service, embedded_fonts,

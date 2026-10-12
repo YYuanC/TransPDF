@@ -1,28 +1,29 @@
 volumes:
-  pdf_translate_data:
+  transpdf_data:
   libretranslate_data:    # remove this line if using an external LibreTranslate instance
 
 services:
-  pdf-translate:
-    # Use the pre-built image from GitHub Container Registry (recommended):
-    image: ghcr.io/jctots/pdf-translate:latest
-    # Or build locally from source (uncomment and comment out the image line above):
-    # build: .
+  transpdf:
+    # Build this fork locally, including the bundled Chinese fonts.
+    build: .
+    image: transpdf:local
     ports:
       - "7860:7860"
     volumes:
-      - pdf_translate_data:/app/data
+      - transpdf_data:/app/data
     environment:
       # Default backend on first launch (before config.json is created).
-      # "LibreTranslate" uses the bundled service below — private, no internet needed.
-      # Change to "Google" or "Ollama" if you prefer a different default.
-      - PDF_TRANSLATE_BACKEND=LibreTranslate
+      # Bing requires no API key. Change to "LibreTranslate" or "Ollama" for a local backend.
+      - PDF_TRANSLATE_BACKEND=Bing
+      # Default concurrent translation requests per PDF for all backends (1–128).
+      # Saved translation_threads in config.json takes precedence. Default: 3
+      # - PDF_TRANSLATE_THREADS=4
       # URL for LibreTranslate. Points to the bundled service by default.
       # If you use an external instance, set this to its URL and remove
       # the libretranslate service block and libretranslate_data volume below.
       - LIBRETRANSLATE_URL=http://libretranslate:5000
       # Delay between LibreTranslate API calls (ms). Prevents 429 on self-hosted
-      # instances. Only applied when LibreTranslate backend is active. Default: 200
+      # instances. Applied after each call in each translation worker. Default: 200
       # - LIBRETRANSLATE_BLOCK_DELAY_MS=200
       # Enable debug info in the status box and docker logs (1=on, 0=off). Default: off
       # - PDF_TRANSLATE_DEBUG=1
@@ -36,7 +37,7 @@ services:
   # To use an external LibreTranslate instance instead:
   #   1. Remove or comment out this entire service block.
   #   2. Remove the libretranslate_data volume above.
-  #   3. Remove the depends_on block from pdf-translate above.
+  #   3. Remove the depends_on block from transpdf above.
   #   4. Set LIBRETRANSLATE_URL to your instance URL.
   libretranslate:
     image: libretranslate/libretranslate:latest
