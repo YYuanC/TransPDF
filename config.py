@@ -94,6 +94,15 @@ def validate_cjk_font_family(value: str) -> str:
 # OCR defaults — kept in sync with ocr_utils constants (duplicated here to
 # avoid importing ocr_utils at config load time, which would pull in fitz).
 OCR_DEFAULT_SERVICE      = "Tesseract"
+OCR_MODES = ("off", "auto", "force")
+
+
+def validate_ocr_mode(value: str) -> str:
+    if value not in OCR_MODES:
+        raise ValueError("OCR mode must be off, auto, or force.")
+    return value
+
+
 OCR_LLM_DEFAULT_MODEL    = "glm-ocr"
 OCR_LLM_DEFAULT_PROMPT   = (
     "Extract all text from this document image. "
@@ -122,7 +131,7 @@ DEFAULT_CONFIG: dict = {
     "filter_icons":         True,
     "merge_blocks":         False,
     "detect_tables":        True,
-    "force_ocr":            False,
+    "ocr_mode":             "auto",
     "translation_threads":  DEFAULT_TRANSLATION_THREADS,
     "cjk_font_family":      DEFAULT_CJK_FONT_FAMILY,
     "ollama_url":           OLLAMA_DEFAULT_URL,
@@ -146,7 +155,14 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         try:
             with CONFIG_PATH.open() as f:
-                cfg = {**DEFAULT_CONFIG, **json.load(f)}
+                raw = json.load(f)
+                cfg = {**DEFAULT_CONFIG, **raw}
+                # Migrate configurations written before the three-state OCR mode.
+                if "ocr_mode" not in raw and "force_ocr" in raw:
+                    cfg["ocr_mode"] = "force" if raw["force_ocr"] else "auto"
+                cfg.pop("force_ocr", None)
+                if cfg["ocr_mode"] not in OCR_MODES:
+                    cfg["ocr_mode"] = "auto"
             try:
                 cfg["translation_threads"] = validate_translation_threads(cfg["translation_threads"])
             except ValueError as exc:
@@ -180,7 +196,7 @@ def save_config(
     ocr_ollama_prompt: str = OCR_LLM_DEFAULT_PROMPT,
     merge_blocks: bool = False,
     detect_tables: bool = True,
-    force_ocr: bool = False,
+    ocr_mode: str = "auto",
     translation_threads: int = DEFAULT_TRANSLATION_THREADS,
     cjk_font_family: str = DEFAULT_CJK_FONT_FAMILY,
 ) -> str:
@@ -192,7 +208,7 @@ def save_config(
         "filter_icons":         filter_icons,
         "merge_blocks":         merge_blocks,
         "detect_tables":        detect_tables,
-        "force_ocr":            force_ocr,
+        "ocr_mode":             validate_ocr_mode(ocr_mode),
         "translation_threads":  validate_translation_threads(translation_threads),
         "cjk_font_family":      validate_cjk_font_family(cjk_font_family),
         "ollama_url":           ollama_url,
@@ -217,6 +233,7 @@ def update_config(updates: dict) -> None:
     Only keys present in *updates* are changed; all other values are preserved.
     """
     merged = {**load_config(), **updates}
+    merged["ocr_mode"] = validate_ocr_mode(merged["ocr_mode"])
     merged["translation_threads"] = validate_translation_threads(merged["translation_threads"])
     merged["cjk_font_family"] = validate_cjk_font_family(merged["cjk_font_family"])
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

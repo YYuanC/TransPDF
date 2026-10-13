@@ -256,7 +256,7 @@ def translate_pdf_generic(
     ocr_config: dict | None = None,
     merge_blocks: bool = False,
     detect_tables: bool = True,
-    force_ocr: bool = False,
+    ocr_mode: str = "auto",
     translation_threads: int | None = None,
 ):
     """
@@ -293,7 +293,7 @@ def translate_pdf_generic(
         ocr_label = ocr_service
         if ocr_service == "Ollama" and ocr_config:
             ocr_label = f"Ollama ({ocr_config.get('model', '?')})"
-        scan_mode = f"force_ocr={force_ocr}  ocr_service={ocr_label}  merge_blocks={merge_blocks}  detect_tables={detect_tables}"
+        scan_mode = f"ocr_mode={ocr_mode}  ocr_service={ocr_label}  merge_blocks={merge_blocks}  detect_tables={detect_tables}"
         _status(f"[debug] prescan start  {scan_mode}")
 
     try:
@@ -301,7 +301,7 @@ def translate_pdf_generic(
             pdf_path, filter_icons, ocr_lang=ocr_lang,
             ocr_service=ocr_service, ocr_config=ocr_config,
             merge_blocks=merge_blocks, detect_tables=detect_tables,
-            force_ocr=force_ocr,
+            ocr_mode=ocr_mode,
         )
     except Exception as exc:
         err_msg = f"[error] prescan failed: {type(exc).__name__}: {exc}"
@@ -401,7 +401,7 @@ def translate_pdf_sync(
     ocr_config: dict | None = None,
     merge_blocks: bool = False,
     detect_tables: bool = True,
-    force_ocr: bool = False,
+    ocr_mode: str = "auto",
     translation_threads: int | None = None,
     cancel_event: threading.Event | None = None,
 ) -> tuple[str, str, str]:
@@ -428,7 +428,7 @@ def translate_pdf_sync(
         _ocr_label = ocr_service
         if ocr_service == "Ollama" and ocr_config:
             _ocr_label = f"Ollama ({ocr_config.get('model', '?')})"
-        log.log(f"[prescan] force_ocr={force_ocr}  ocr_service={_ocr_label}  "
+        log.log(f"[prescan] ocr_mode={ocr_mode}  ocr_service={_ocr_label}  "
                 f"merge_blocks={merge_blocks}  detect_tables={detect_tables}")
 
     try:
@@ -436,7 +436,7 @@ def translate_pdf_sync(
             pdf_path, filter_icons, ocr_lang=ocr_lang,
             ocr_service=ocr_service, ocr_config=ocr_config,
             merge_blocks=merge_blocks, detect_tables=detect_tables,
-            force_ocr=force_ocr,
+            ocr_mode=ocr_mode,
         )
     except Exception as exc:
         if log:

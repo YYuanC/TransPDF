@@ -325,7 +325,7 @@ class TestTranslate:
         assert r.headers.get("retry-after") == "60"
 
     def test_processing_options_accepted(self, reset_job, minimal_pdf, tmp_path):
-        """merge_blocks, detect_tables=false, force_ocr are accepted without 422."""
+        """merge_blocks, detect_tables=false, ocr_mode are accepted without 422."""
         fake_translated = tmp_path / "translated.pdf"
         fake_sbs        = tmp_path / "sbs.pdf"
         fake_reading    = tmp_path / "reading.html"
@@ -343,7 +343,7 @@ class TestTranslate:
                     "source": "en", "target": "nl",
                     "merge_blocks": "true",
                     "detect_tables": "false",
-                    "force_ocr": "true",
+                    "ocr_mode": "force",
                 },
             )
         assert r.status_code == 200
@@ -385,8 +385,9 @@ class TestTranslate:
         assert str(tmp_path) in cleaned_paths
         assert len(cleaned_paths) == 2
 
-    def test_processing_options_forwarded(self, reset_job, minimal_pdf, tmp_path):  # noqa: E301
-        """merge_blocks, detect_tables, force_ocr values are forwarded to translate_sync."""
+    @pytest.mark.parametrize("ocr_mode", ["off", "auto", "force"])
+    def test_processing_options_forwarded(self, reset_job, minimal_pdf, tmp_path, ocr_mode):
+        """merge_blocks, detect_tables, ocr_mode values are forwarded to translate_sync."""
         from unittest.mock import MagicMock
         fake_translated = tmp_path / "translated.pdf"
         fake_sbs        = tmp_path / "sbs.pdf"
@@ -406,14 +407,25 @@ class TestTranslate:
                     "source": "en", "target": "nl",
                     "merge_blocks": "true",
                     "detect_tables": "false",
-                    "force_ocr": "true",
+                    "ocr_mode": ocr_mode,
                 },
             )
 
         _, kwargs = mock_sync.call_args
         assert kwargs.get("merge_blocks") is True
         assert kwargs.get("detect_tables") is False
-        assert kwargs.get("force_ocr") is True
+        assert kwargs.get("ocr_mode") == ocr_mode
+
+    @pytest.mark.parametrize("ocr_mode", ["true", "false", "invalid"])
+    def test_invalid_ocr_mode_rejected(self, reset_job, minimal_pdf, ocr_mode):
+        with patch("app.translate_sync") as translate:
+            response = client.post(
+                "/api/translate",
+                files={"file": ("doc.pdf", minimal_pdf.read_bytes(), "application/pdf")},
+                data={"ocr_mode": ocr_mode},
+            )
+        assert response.status_code == 422
+        translate.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

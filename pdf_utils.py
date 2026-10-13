@@ -188,13 +188,12 @@ def _merge_same_line_blocks(blocks: list[tuple]) -> list[tuple]:
 def prescan_blocks(
     pdf_path: str,
     filter_icons: bool = True,
-    ocr_fallback: bool = True,
     ocr_lang: str = "eng",
     ocr_service: str = "Tesseract",
     ocr_config: dict | None = None,
     merge_blocks: bool = False,
     detect_tables: bool = True,
-    force_ocr: bool = False,
+    ocr_mode: str = "auto",
 ) -> tuple[list[list[tuple]], int, int, dict[str, bytes]]:
     """
     Scan the PDF, collect translatable text blocks, and extract embedded fonts.
@@ -208,19 +207,23 @@ def prescan_blocks(
     is always False) and the write step applies right/down-expand rather than
     shrink-to-fit.
 
-    When ocr_fallback is True (default), pages that yield zero text blocks and
+    When ocr_mode is "auto" (default), pages that yield zero text blocks and
     are detected as scanned (no usable text layer) are processed with OCR.
 
-    When force_ocr is True, the text layer is ignored entirely and every page
+    When ocr_mode is "force", the text layer is ignored entirely and every page
     is rendered as an image and processed with OCR.  Use this for mixed PDFs
     where the text layer is incomplete or misleading (e.g. DTP PDFs where
     scanned and digital content are interleaved).
 
-    ocr_service selects the OCR engine for both fallback and force_ocr modes:
+    When ocr_mode is "off", OCR is never invoked.
+    ocr_service selects the OCR engine for both automatic and forced OCR modes:
       "Tesseract" — use pytesseract (requires pytesseract + Pillow)
       "Ollama"    — use a vision LLM via Ollama; ocr_config must contain
                     {"url": str, "model": str, "prompt": str}
     """
+    from config import validate_ocr_mode
+    validate_ocr_mode(ocr_mode)
+
     doc = fitz.open(pdf_path)
     n_pages        = len(doc)
     embedded_fonts = extract_doc_fonts(doc)
@@ -228,7 +231,7 @@ def prescan_blocks(
     total_blocks = 0
 
     for page in doc:
-        if force_ocr:
+        if ocr_mode == "force":
             # Bypass the text layer entirely — render page as image and OCR it.
             if ocr_service == "Ollama":
                 from ocr_utils import ocr_page_llm  # lazy
@@ -333,7 +336,7 @@ def prescan_blocks(
                     blocks.append((x0, y0, x1, y1, text, fontsize, orig_font_name, flags, is_table_cell))
             # OCR fallback: if the page yielded no translatable blocks and looks
             # scanned, run OCR to extract text from the page image.
-            if not blocks and ocr_fallback:
+            if not blocks and ocr_mode == "auto":
                 from ocr_utils import is_scanned_page  # lazy — optional dep
                 if is_scanned_page(page):
                     if ocr_service == "Ollama":

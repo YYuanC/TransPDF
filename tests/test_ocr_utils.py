@@ -11,6 +11,7 @@ import fitz
 import pytest
 
 import ocr_utils
+from pdf_utils import prescan_blocks
 from ocr_utils import (
     MIN_VISIBLE_CHARS,
     OCR_DPI,
@@ -29,6 +30,24 @@ from ocr_utils import (
 # ---------------------------------------------------------------------------
 # source_lang_to_tesseract
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("mode,has_text,expected_calls", [
+    ("off", False, 0), ("off", True, 0),
+    ("auto", False, 1), ("auto", True, 0),
+    ("force", False, 1), ("force", True, 1),
+])
+@pytest.mark.parametrize("engine", ["Tesseract", "Ollama"])
+def test_ocr_modes(tmp_path, mode, has_text, expected_calls, engine):
+    path = tmp_path / "ocr_modes.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        if has_text:
+            page.insert_text((72, 72), "This page contains native text.")
+        doc.save(str(path))
+    with patch("ocr_utils.ocr_page", return_value=[]) as tess, patch("ocr_utils.ocr_page_llm", return_value=[]) as llm:
+        prescan_blocks(str(path), ocr_mode=mode, ocr_service=engine, detect_tables=False)
+    assert tess.call_count == (expected_calls if engine == "Tesseract" else 0)
+    assert llm.call_count == (expected_calls if engine == "Ollama" else 0)
 
 class TestSourceLangToTesseract:
     def test_known_codes(self):

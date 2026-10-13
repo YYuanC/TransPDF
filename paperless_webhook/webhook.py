@@ -71,7 +71,9 @@ def _bool_env(name: str, default: bool) -> bool:
     return default if v == "" else v.lower() in ("1", "true", "yes")
 
 API_MERGE_BLOCKS  = _bool_env("PDF_TRANSLATE_MERGE_BLOCKS",  False)
-API_FORCE_OCR     = _bool_env("PDF_TRANSLATE_FORCE_OCR",     False)
+API_OCR_MODE      = os.environ.get("PDF_TRANSLATE_OCR_MODE", "auto")
+if API_OCR_MODE not in {"off", "auto", "force"}:
+    raise ValueError("PDF_TRANSLATE_OCR_MODE must be off, auto, or force.")
 API_ALLOW_WRAP    = _bool_env("PDF_TRANSLATE_ALLOW_WRAP",    False)
 API_FILTER_ICONS  = _bool_env("PDF_TRANSLATE_FILTER_ICONS",  True)
 API_DETECT_TABLES = _bool_env("PDF_TRANSLATE_DETECT_TABLES", True)
@@ -336,7 +338,7 @@ def translate_pdf(pdf_bytes: bytes, fmt: str, filename: str) -> bytes:
         "libre_url":     API_LIBRE_URL,
         "ollama_url":    API_OLLAMA_URL,
         "merge_blocks":  str(API_MERGE_BLOCKS).lower(),
-        "force_ocr":     str(API_FORCE_OCR).lower(),
+        "ocr_mode":      API_OCR_MODE,
         "allow_wrap":    str(API_ALLOW_WRAP).lower(),
         "filter_icons":  str(API_FILTER_ICONS).lower(),
         "detect_tables": str(API_DETECT_TABLES).lower(),

@@ -197,8 +197,13 @@ The following form fields control how the PDF is scanned and prepared before tra
 | `filter_icons` | bool | `true` | Strip single-character lines likely to be icon glyphs from mixed text blocks. Disable only if legitimate single-character content (section letters, bullets) is being dropped. |
 | `merge_blocks` | bool | `false` | Merge same-line adjacent fragments into one block before translation. Enable for DTP/InDesign PDFs where each word is a separate text object (symptom: many small blocks per page, 429 errors on self-hosted backends). Not recommended for multi-column layouts. |
 | `detect_tables` | bool | `true` | Use PyMuPDF's table detector to identify table cells and apply shrink-to-fit text fitting. Disable if translated text appears abnormally small — this indicates a false-positive table detection. |
-| `force_ocr` | bool | `false` | Ignore the existing text layer entirely and OCR every page as an image (using the backend's OCR engine). Use for mixed PDFs where digital and scanned content are interleaved and translating the text layer alone gives incomplete results. Requires OCR dependencies (Tesseract or reachable Ollama vision model). |
+| `ocr_mode` | string | `auto` | OCR mode: `off` disables OCR, `auto` OCRs only pages without usable text, and `force` ignores the text layer and OCRs every page. |
 | `translation_threads` | int (1–128) | Saved global setting, otherwise `PDF_TRANSLATE_THREADS` (3) | Concurrent text-block requests per PDF for all backends. Overrides the global setting for this request. Page/block output order is preserved; OCR and PDF writing remain sequential. |
+
+`ocr_mode` replaces the former `force_ocr` boolean field. Update integrations to
+send `ocr_mode=force` instead of `force_ocr=true`, or `ocr_mode=auto` instead of
+`force_ocr=false`. The API defaults to `auto`. To save the UI selection, use
+`PATCH /api/config` with `{"ocr_mode": "off"}`, `"auto"`, or `"force"`.
 
 ## 📦 Output formats
 
@@ -255,7 +260,7 @@ The setting accepts integers from 1 to 128 and takes effect for new translations
 |--------|---------|--------|
 | `200` | Success — response body is the output file | — |
 | `409` | Translation was cancelled via `DELETE /api/translate` | Retry if desired |
-| `422` | No translatable text found in the PDF | Enable `force_ocr=true` and retry |
+| `422` | No translatable text found in the PDF | Enable `ocr_mode=force` and retry |
 | `429` | Queue full (2 jobs already running/waiting) | Wait `Retry-After` seconds, then retry |
 | `500` | Translation or OCR failure | See error detail below |
 
@@ -279,7 +284,7 @@ Branch on `error_type` in automation scripts. The possible values and their mean
 | `translation_rate_limit` | Translation backend rate-limited — all retries exhausted | Wait 60 s, then retry |
 | `config_error` | Backend unreachable (connection refused) | Check service config, do not retry blindly |
 | `translation_error` | Other translation or pipeline failure | Check `detail` message; may be transient |
-| `no_text` | No translatable text found (returned as 422) | Enable `force_ocr=true`, then retry |
+| `no_text` | No translatable text found (returned as 422) | Enable `ocr_mode=force`, then retry |
 | `cancelled` | Job cancelled via `DELETE /api/translate` (returned as 409) | Retry if desired |
 
 ### Decision tree for custom integrations
@@ -291,7 +296,7 @@ Branch on `error_type` in automation scripts. The possible values and their mean
 ```
 POST /api/translate
 ├── 200 → done ✓
-├── 422 → retry with force_ocr=true
+├── 422 → retry with ocr_mode=force
 │           still 422 → skip (no translatable text)
 ├── 429 (queue full) → sleep Retry-After → retry
 ├── 500 + "GGML_ASSERT"
@@ -341,7 +346,7 @@ curl -X POST http://localhost:7860/api/translate \
 curl -X POST http://localhost:7860/api/translate \
   -F "file=@mixed-scan.pdf" \
   -F "source=de" -F "target=en" \
-  -F "force_ocr=true" \
+  -F "ocr_mode=force" \
   --output translated.pdf
 
 # Cancel running translation

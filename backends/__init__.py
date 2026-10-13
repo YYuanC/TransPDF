@@ -61,7 +61,7 @@ def translate(
     ocr_ollama_prompt: str = "",
     merge_blocks: bool = False,
     detect_tables: bool = True,
-    force_ocr: bool = False,
+    ocr_mode: str = "auto",
     translation_threads: int | None = None,
 ):
     """
@@ -102,7 +102,7 @@ def translate(
         pdf_path, source_lang, target_lang, service, call_fn, allow_wrap, filter_icons,
         meta=meta, ocr_service=ocr_service, ocr_config=ocr_config,
         merge_blocks=merge_blocks, detect_tables=detect_tables,
-        force_ocr=force_ocr,
+        ocr_mode=ocr_mode,
         translation_threads=threads,
     )
 
@@ -126,7 +126,7 @@ def translate_sync(
     ocr_ollama_prompt: str | None = None,
     merge_blocks: bool = False,
     detect_tables: bool = True,
-    force_ocr: bool = False,
+    ocr_mode: str = "auto",
     translation_threads: int | None = None,
 ) -> tuple[str, str, str]:
     """
@@ -170,6 +170,6 @@ def translate_sync(
         pdf_path, source_lang, target_lang, service, call_fn, allow_wrap, filter_icons,
         ocr_service=_ocr_service, ocr_config=ocr_cfg,
         merge_blocks=merge_blocks, detect_tables=detect_tables,
-        force_ocr=force_ocr,
+        ocr_mode=ocr_mode,
         translation_threads=translation_threads, cancel_event=cancel_event,
     )

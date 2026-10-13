@@ -178,7 +178,7 @@ These are passed as request parameters on every call to TransPDF. They configure
 | `PDF_TRANSLATE_OLLAMA_MODEL` | *(TransPDF default)* | Ollama translation model name |
 | `PDF_TRANSLATE_OLLAMA_KEY` | *(empty)* | Ollama API key (optional) |
 | `PDF_TRANSLATE_MERGE_BLOCKS` | `false` | Merge split word-level text fragments before translation. **Enable for DTP/InDesign PDFs** or Paperless-archived PDFs with fragmented text. |
-| `PDF_TRANSLATE_FORCE_OCR` | `false` | Ignore the text layer and OCR every page. Use for scanned PDFs with no text layer. |
+| `PDF_TRANSLATE_OCR_MODE` | `auto` | `off`: disable OCR; `auto`: automatic OCR fallback; `force`: ignore the text layer and OCR every page. |
 | `PDF_TRANSLATE_ALLOW_WRAP` | `false` | Collapse line breaks before translation (helps with hard-wrapped paragraphs) |
 | `PDF_TRANSLATE_FILTER_ICONS` | `true` | Strip single-character icon glyphs from mixed text blocks |
 | `PDF_TRANSLATE_DETECT_TABLES` | `true` | Detect table cells and apply shrink-to-fit text fitting |

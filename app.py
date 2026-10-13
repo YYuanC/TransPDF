@@ -310,9 +310,11 @@ with gr.Blocks(title="TransPDF — PDF 翻译", fill_width=False) as gradio_app:
                     step=1,
                     info="每个 PDF 并发处理的文本块请求数。1 表示顺序处理。保存后将作为网页和 API 的全局默认值。",
                 )
-                force_ocr_cb = gr.Checkbox(
-                    label="强制 OCR（忽略文本层）",
-                    value=cfg.get("force_ocr", False),
+                ocr_mode_dropdown = gr.Dropdown(
+                    label="OCR 模式",
+                    choices=[("关闭", "off"), ("开启", "auto"), ("强制", "force")],
+                    value=cfg["ocr_mode"],
+                    info="关闭：不进行 OCR；开启：无可用文本时自动回退 OCR；强制：忽略文本层，对所有页面进行 OCR。",
                 )
                 ocr_service = gr.Dropdown(
                     label="OCR 引擎（仅扫描 PDF）",
@@ -422,17 +424,17 @@ with gr.Blocks(title="TransPDF — PDF 翻译", fill_width=False) as gradio_app:
     # Re-read config.json on every page load so saved settings survive a reload
     def _refresh_config():
         c = load_config()
-        force_ocr = c.get("force_ocr", False)
+        ocr_mode = c["ocr_mode"]
         return (
             c["source"],
             c["target"],
             c["backend"],
             c["allow_wrap"],
-            # Text-layer-only options: disable when force_ocr is saved as True
-            gr.update(value=c["filter_icons"],           interactive=not force_ocr),
-            gr.update(value=c.get("merge_blocks", False), interactive=not force_ocr),
-            gr.update(value=c.get("detect_tables", True), interactive=not force_ocr),
-            force_ocr,
+            # Text-layer-only options: disable only when OCR bypasses the text layer.
+            gr.update(value=c["filter_icons"],           interactive=ocr_mode != "force"),
+            gr.update(value=c.get("merge_blocks", False), interactive=ocr_mode != "force"),
+            gr.update(value=c.get("detect_tables", True), interactive=ocr_mode != "force"),
+            ocr_mode,
             c["ollama_url"],
             c["ollama_model"],
             c["ollama_system_prompt"],
@@ -449,25 +451,25 @@ with gr.Blocks(title="TransPDF — PDF 翻译", fill_width=False) as gradio_app:
     gradio_app.load(
         _refresh_config,
         outputs=[source_lang, target_lang, backend, allow_wrap_cb, filter_icons_cb,
-                 merge_blocks_cb, detect_tables_cb, force_ocr_cb,
+                 merge_blocks_cb, detect_tables_cb, ocr_mode_dropdown,
                  ollama_url, ollama_model, ollama_system_prompt, ollama_key, libre_url, libre_key,
                  ocr_service, ocr_ollama_model, ocr_ollama_prompt, translation_threads, cjk_font_family],
     )
 
-    # Disable text-layer-only options when Force OCR is checked — they have no
+    # Disable text-layer-only options when forced OCR is selected — they have no
     # effect when the text layer is bypassed entirely.
     # allow_wrap_cb is kept interactive because line-break collapsing applies to
     # OCR paragraphs too.
-    def _toggle_text_layer_opts(force_ocr: bool):
+    def _toggle_text_layer_opts(ocr_mode: str):
         return (
-            gr.update(interactive=not force_ocr),  # filter_icons_cb
-            gr.update(interactive=not force_ocr),  # merge_blocks_cb
-            gr.update(interactive=not force_ocr),  # detect_tables_cb
+            gr.update(interactive=ocr_mode != "force"),  # filter_icons_cb
+            gr.update(interactive=ocr_mode != "force"),  # merge_blocks_cb
+            gr.update(interactive=ocr_mode != "force"),  # detect_tables_cb
         )
 
-    force_ocr_cb.change(
+    ocr_mode_dropdown.change(
         _toggle_text_layer_opts,
-        inputs=[force_ocr_cb],
+        inputs=[ocr_mode_dropdown],
         outputs=[filter_icons_cb, merge_blocks_cb, detect_tables_cb],
     )
 
@@ -537,7 +539,7 @@ with gr.Blocks(title="TransPDF — PDF 翻译", fill_width=False) as gradio_app:
             ocr_ollama_prompt,
             merge_blocks_cb,
             detect_tables_cb,
-            force_ocr_cb,
+            ocr_mode_dropdown,
             translation_threads,
             cjk_font_family,
         ],
@@ -565,7 +567,7 @@ with gr.Blocks(title="TransPDF — PDF 翻译", fill_width=False) as gradio_app:
             ocr_ollama_prompt,
             merge_blocks_cb,
             detect_tables_cb,
-            force_ocr_cb,
+            ocr_mode_dropdown,
             translation_threads,
         ],
         outputs=[*batch_outputs, pdf_input, translate_btn],
@@ -617,6 +619,7 @@ def _init_sem() -> asyncio.Semaphore:
 
 
 class ConfigUpdate(BaseModel):
+    ocr_mode: Optional[Literal["off", "auto", "force"]] = None
     cjk_font_family: Optional[Literal["auto", "serif", "sans-serif", "wenkai"]] = None
     backend:              Optional[str] = None
     ollama_url:           Optional[str] = None
@@ -829,10 +832,10 @@ async def api_translate(
         description="Detect table cells and apply shrink-to-fit text fitting. "
                     "Disable if translated text appears abnormally small.",
     ),
-    force_ocr: bool = Form(
-        False,
-        description="Ignore the text layer and OCR every page as an image. "
-                    "Use for mixed PDFs where the text layer is incomplete.",
+    ocr_mode: Literal["off", "auto", "force"] = Form(
+        "auto",
+        description="OCR mode: 'off' disables OCR, 'auto' OCRs only pages without usable text, "
+                    "'force' OCRs every page.",
     ),
     translation_threads: Optional[int] = Form(
         None,
@@ -950,7 +953,8 @@ async def api_translate(
                             ollama_key=ollama_key, allow_wrap=allow_wrap,
                             filter_icons=filter_icons, cancel_event=_job.cancel_event,
                             merge_blocks=merge_blocks, detect_tables=detect_tables,
-                            force_ocr=force_ocr, translation_threads=translation_threads,
+                            ocr_mode=ocr_mode,
+                            translation_threads=translation_threads,
                         )
                         result.update(status="completed", translated_path=translated,
                                       sbs_path=sbs, html_path=reading)

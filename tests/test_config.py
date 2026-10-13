@@ -14,6 +14,13 @@ from config import DEFAULT_CONFIG, OCR_LLM_DEFAULT_PROMPT, load_config, save_con
 # ---------------------------------------------------------------------------
 
 class TestLoadConfig:
+    @pytest.mark.parametrize("legacy,expected", [(False, "auto"), (True, "force")])
+    def test_legacy_ocr_config_migrated(self, isolated_config, legacy, expected):
+        isolated_config.write_text(json.dumps({"force_ocr": legacy}))
+        result = load_config()
+        assert result["ocr_mode"] == expected
+        assert "force_ocr" not in result
+
     def test_returns_defaults_when_no_file(self, isolated_config):
         # isolated_config path does not exist yet
         result = load_config()
@@ -51,7 +58,8 @@ class TestLoadConfig:
         }
         isolated_config.write_text(json.dumps(custom))
         result = load_config()
-        assert result == custom
+        custom.pop("force_ocr")
+        assert result == {**custom, "ocr_mode": "force"}
 
     def test_returns_defaults_on_invalid_json(self, isolated_config):
         isolated_config.write_text("not valid json {{")
@@ -88,6 +96,11 @@ _SAVE_ARGS = dict(
 
 
 class TestSaveConfig:
+    @pytest.mark.parametrize("mode", ["off", "auto", "force"])
+    def test_ocr_mode_survives_reload(self, isolated_config, mode):
+        save_config(**_SAVE_ARGS, ocr_mode=mode)
+        assert load_config()["ocr_mode"] == mode
+
     def test_saves_and_loads_roundtrip(self, isolated_config):
         save_config(**_SAVE_ARGS)
         assert isolated_config.exists()
