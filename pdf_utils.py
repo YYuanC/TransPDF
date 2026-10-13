@@ -375,7 +375,7 @@ def write_translated_pdf(
     cjk_font_family: str = "auto",
 ) -> None:
     """
-    Write a translated PDF: image background + white rects + translated text.
+    Write a translated PDF: image background + compact white rects + translated text.
 
     Block tuple: (x0, y0, x1, y1, translated_text, fontsize, orig_font_name, flags, is_table_cell)
 
@@ -525,8 +525,10 @@ def write_translated_pdf(
                 # ── Regular block: expand right/down, never shrink ──────────
                 right_rect      = fitz.Rect(x0, y0, w - RIGHT_MARGIN, y1)
                 has_right_space = right_rect.width > orig_rect.width
-                clear_rect      = right_rect if has_right_space else orig_rect
-                _clear(clear_rect)
+                # Only cover the original text bbox.  The insertion rectangle may
+                # expand to fit a longer translation, but clearing that larger
+                # area creates conspicuous white bands on non-white page content.
+                _clear(orig_rect)
 
                 inserted = False
 
@@ -548,12 +550,11 @@ def write_translated_pdf(
 
                 if not inserted:
                     # Down-expand: use right-expanded width where available.
-                    # Clear each candidate area before inserting so text doesn't
-                    # render over the image background below y1.
+                    # Keep the surrounding page background visible while allowing
+                    # a long translation to flow below the original block.
                     expand_x1 = (w - RIGHT_MARGIN) if has_right_space else x1
                     for mult in (1.5, 2.0, 3.0, 5.0):
                         try_rect = fitz.Rect(x0, y0, expand_x1, y0 + block_h * mult)
-                        _clear(try_rect)
                         rc = _insert_textbox(
                             try_rect, translated,
                             fontsize=fontsize, fontname=alias, color=(0, 0, 0), align=0,
