@@ -4,9 +4,23 @@ A self-hosted web app for translating PDF documents. Upload a PDF, choose your l
 
 ## 🚀 Starting the app
 
+### Docker Compose
+
+From a checkout of this repository:
+
+```bash
+docker compose up -d --build
+```
+
+This builds TransPDF locally, persists configuration in `transpdf_data`, and starts LibreTranslate alongside it. The app still defaults to Bing; select LibreTranslate with URL `http://libretranslate:5000` for local translation. The first LibreTranslate startup downloads language models. See the [README](../README.md#快速开始) for published-image instructions.
+
+### Precompiled binaries
+
+Download the archive for your operating system and CPU architecture from [GitHub Releases](https://github.com/YYuanC/TransPDF/releases). Extract the entire `TransPDF` directory, including `_internal`, then run `TransPDF.exe` on Windows or `./TransPDF` on Linux/macOS from a terminal in that directory. Keep the terminal running. Python is bundled; Tesseract and its language packs must be installed separately if you use Tesseract OCR. Configuration is saved to `_internal/data/config.json` inside the extracted `TransPDF` directory; ensure `_internal` is writable.
+
 ### Run from source
 
-Python 3.11+ is required. Follow the [README setup instructions](../README.md#快速开始) to clone the repository, create a virtual environment, and install `requirements.txt`. Docker deployment and PyInstaller executables are currently unsupported.
+Python 3.11+ is required. Follow the [README setup instructions](../README.md#快速开始) to clone the repository, create a virtual environment, and install `requirements.txt`.
 
 ```bash
 # Activate the virtual environment (first time or new terminal)
@@ -126,7 +140,7 @@ Select **Bing** from the main translation engine dropdown. It uses Bing's web tr
 
 ### Saving configuration
 
-Click **保存配置** at the bottom of the Backend settings accordion. Settings are written to `data/config.json` and loaded on next start. `data/` is gitignored — it is never committed.
+Click **保存配置** at the bottom of the Backend settings accordion. Settings are loaded on next start. Source installations save to `data/config.json` in the repository root, binaries save to `_internal/data/config.json` inside the extracted `TransPDF` directory, and Docker saves to `/app/data/config.json` (persisted in `transpdf_data` with the repository's Compose setup). Ensure the configuration directory is writable. `data/` is gitignored — it is never committed.
 
 ## 🌍 Supported languages
 

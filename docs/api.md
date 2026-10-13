@@ -308,7 +308,7 @@ POST /api/translate
 
 ## 📄 Paperless-ngx integration
 
-See [paperless_webhook/README.md](../paperless_webhook/README.md) for the complete Paperless-ngx setup guide — running the webhook from source, one-time Paperless configuration, environment variables, and log format.
+See [paperless_webhook/README.md](../paperless_webhook/README.md) for the complete Paperless-ngx setup guide — running the webhook from source or Docker, one-time Paperless configuration, environment variables, and log format.
 
 ## ⚡ Quick reference
 

@@ -1,6 +1,6 @@
 # 🔧 Setting up translation backends
 
-TransPDF supports four translation backends and runs from source (see the [README](../README.md#快速开始)). **LibreTranslate** and **Ollama** must be installed separately or reached through an existing instance. **Google Translate** and **Bing Translator** work without API keys but send your PDF text to their cloud services; use them only for quick tests or non-sensitive documents.
+TransPDF supports four translation backends and can run from source, Docker, or precompiled binaries (see the [README](../README.md#快速开始)). **LibreTranslate** is included as a separate service in the repository's Docker Compose setup. With source or binary installations, install **LibreTranslate** or **Ollama** separately, or connect to an existing instance. **Google Translate** and **Bing Translator** work without API keys but send your PDF text to their cloud services; use them only for quick tests or non-sensitive documents.
 
 ## 🦙 Ollama
 
@@ -44,6 +44,10 @@ Click **Test connection**, then **Save configuration**.
 
 For an Ollama instance on another machine, set **Ollama URL** to its reachable address, such as `http://your-server-ip:11434`.
 
+### Docker networking
+
+When TransPDF runs in Docker, `localhost` refers to the TransPDF container itself. For Ollama on the host, use a host address reachable from the container (for example `http://host.docker.internal:11434` on Docker Desktop); Ollama must listen on that reachable interface. For Ollama in another container on the same network, use its service name, such as `http://ollama:11434`. Pull the model on the Ollama instance you connect to.
+
 ### ⚙️ OCR with Ollama vision models
 
 When **Force OCR** is enabled, Ollama is used as a vision model to read scanned pages:
@@ -69,6 +73,19 @@ Set **OCR engine** → `Ollama (vision)` and **OCR model** → `glm-ocr` in Back
 LibreTranslate is a free, open-source translation API — fully self-hosted, no data leaves your network.
 
 → [libretranslate.com](https://libretranslate.com) · [GitHub](https://github.com/LibreTranslate/LibreTranslate)
+
+### Docker Compose
+
+From the TransPDF repository root:
+
+```bash
+docker compose up -d --build
+docker compose logs -f libretranslate
+```
+
+The bundled LibreTranslate service downloads its language models on first startup. The Compose file sets `--req-limit 0`, restricts models with `--load-only`, and persists them in `libretranslate_data`. In the TransPDF UI, select **LibreTranslate**, set the URL to `http://libretranslate:5000`, then test the connection and save configuration. The default engine remains Bing until you change it.
+
+For TransPDF running from source or a binary on the same host, the exposed LibreTranslate port is available at `http://localhost:5000`. To use an external instance instead, follow the comments in [`docker-compose.yml`](../docker-compose.yml) to remove the bundled service, its volume, and the `depends_on` entry, and set `LIBRETRANSLATE_URL` to the external address.
 
 ### 🖥️ Local install
 

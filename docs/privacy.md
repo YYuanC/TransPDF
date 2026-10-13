@@ -23,7 +23,7 @@ For Bing Translator: text blocks are sent to `www.bing.com` over HTTPS. The back
 
 ## Paperless-ngx webhook data flow
 
-When running the webhook from source, the full chain is:
+When running the webhook from source or Docker, the full chain is:
 
 ```
 Paperless-ngx → webhook receiver → TransPDF → translation backend
@@ -92,6 +92,17 @@ $env:PDF_TRANSLATE_API_KEY = "your-key-here"
 python app.py
 ```
 
+**Docker Compose:** add the key to the `transpdf` service and recreate it:
+
+```yaml
+services:
+  transpdf:
+    environment:
+      - PDF_TRANSLATE_API_KEY=your-key-here
+```
+
+Keep the service's other environment entries when adding this setting, then run `docker compose up -d`. For a binary installation, set the same environment variable before launching the executable.
+
 **Use it in curl:**
 ```bash
 curl -X POST http://localhost:7860/api/translate \
@@ -128,3 +139,5 @@ python -m uvicorn webhook:app --host 0.0.0.0 --port 8081
 ```
 
 On Windows PowerShell, use `$env:WEBHOOK_API_KEY = "your-webhook-key-here"`. Run the webhook from the `paperless_webhook` directory as described in its [README](../paperless_webhook/README.md).
+
+For Docker, set `WEBHOOK_API_KEY` in the webhook service's `environment` section and recreate the container. See the [webhook Docker setup](../paperless_webhook/README.md#docker-deployment).

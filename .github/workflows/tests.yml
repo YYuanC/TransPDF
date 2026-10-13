@@ -1,7 +1,10 @@
 name: Tests
 
 on:
-  # Run source tests manually; no automatic push or pull request triggers.
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  pull_request:
   workflow_dispatch:
 
 env:

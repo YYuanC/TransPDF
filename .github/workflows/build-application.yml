@@ -3,6 +3,16 @@ name: Build application
 on:
   # Application packaging is manually triggered.
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build
+        required: true
+        type: string
+      version:
+        description: Release tag to embed in the application
+        required: true
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -30,6 +40,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,7 +54,14 @@ jobs:
 
       - name: Write build version
         shell: bash
-        run: git describe --tags --always > VERSION
+        env:
+          BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "$BUILD_VERSION" ]]; then
+            printf '%s\n' "$BUILD_VERSION" > VERSION
+          else
+            git describe --tags --always > VERSION
+          fi
 
       - name: Build executable
         shell: bash
@@ -82,5 +100,38 @@ jobs:
         with:
           name: TransPDF-${{ matrix.platform }}
           path: dist/TransPDF
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Archive release package
+        if: inputs.version != ''
+        shell: bash
+        env:
+          BUILD_PLATFORM: ${{ matrix.platform }}
+          BUILD_ARCH: ${{ runner.arch }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+
+          platform = os.environ["BUILD_PLATFORM"]
+          arch = os.environ["BUILD_ARCH"].lower()
+          Path("release-assets").mkdir(exist_ok=True)
+          archive = shutil.make_archive(
+              f"release-assets/TransPDF-{platform}-{arch}",
+              "zip" if platform == "windows" else "gztar",
+              root_dir="dist",
+              base_dir="TransPDF",
+          )
+          print(archive)
+          PY
+
+      - name: Upload release package
+        if: inputs.version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 14
