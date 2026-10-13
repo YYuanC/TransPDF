@@ -1,7 +1,7 @@
 name: Build application
 
 on:
-  # Automatic builds are disabled; PyInstaller packaging is currently unsupported.
+  # Application packaging is manually triggered.
   workflow_dispatch:
 
 env:
@@ -63,6 +63,8 @@ jobs:
             --name TransPDF \
             --collect-all gradio \
             --collect-all gradio_client \
+            --collect-all safehttpx \
+            --collect-all groovy \
             --exclude-module PyQt5 \
             --exclude-module PyQt6 \
             --exclude-module PySide2 \
@@ -71,6 +73,9 @@ jobs:
             --add-data "icon.svg${data_separator}." \
             --add-data "VERSION${data_separator}." \
             app.py
+
+      - name: Verify packaged application starts
+        run: python scripts/smoke_test_application.py
 
       - name: Upload executable
         uses: actions/upload-artifact@v4

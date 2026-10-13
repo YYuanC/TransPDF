@@ -46,6 +46,9 @@ python -m pytest tests/test_backends.py::TestOllamaCall::test_prompt_substitutio
 
 ## 📝 Notes
 
+- GitHub Actions source tests run independently in `Tests` (`tests.yml`). Docker workflows only build and publish images; test results do not block them. Workflows are manually triggered with `workflow_dispatch`.
+- `Build application` starts each packaged executable and checks `/api/health` and the Gradio UI before uploading it. To run the same check locally after a PyInstaller build, use `python scripts/smoke_test_application.py`.
+- Chinese PDF text comparisons use NFC normalization to handle canonically equivalent CJK glyph mappings without folding mathematical symbols or full-width punctuation.
 - No live services required — all HTTP calls are mocked via `unittest.mock` or `sys.modules` patching.
 - `test_api.py` uses a mocked `translate_sync` — no actual PDF translation runs.
 - `test_e2e.py` runs the full pipeline (prescan → translate → write) with a mock translation function; requires `docs/assets/demo-document-de.pdf`.

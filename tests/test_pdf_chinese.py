@@ -5,6 +5,7 @@ Run with pytest, or with python -m unittest tests.test_pdf_chinese.
 
 import tempfile
 import unittest
+import unicodedata
 from pathlib import Path
 from unittest.mock import patch
 
@@ -82,9 +83,12 @@ class TestChinesePdf(unittest.TestCase):
     def assert_text_roundtrip(self, path, expected):
         with fitz.open(path) as doc:
             text = "".join(page.get_text() for page in doc)
-            compact = "".join(text.split())
+            # MuPDF can map a shared CJK glyph to a canonically equivalent
+            # compatibility ideograph (e.g. U+FA08 instead of U+884C).
+            # NFC preserves math symbols and full-width punctuation, unlike NFKC.
+            compact = "".join(unicodedata.normalize("NFC", text).split())
             for phrase in expected:
-                self.assertIn("".join(phrase.split()), compact)
+                self.assertIn("".join(unicodedata.normalize("NFC", phrase).split()), compact)
             self.assertNotIn("\ufffd", text)
             self.assertNotIn("\x00", text)
             # Verify the CJK font file is actually embedded, not just referenced.
