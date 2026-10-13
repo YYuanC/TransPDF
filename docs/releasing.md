@@ -6,10 +6,10 @@
 | --- | --- | --- |
 | `Tests` | 所有分支 push、PR、所有标签 push、手动 | 运行源码测试 |
 | `Build application` | 手动，或由 `Release` 调用 | 构建 Windows、Linux、macOS 程序，检查 API 和网页启动，上传构建产物 |
-| `Build and push Docker image` | 手动 | 独立构建并发布 TransPDF 和 Paperless webhook 镜像到 GHCR |
-| `Release` | 手动 | 为已有版本标签构建二进制程序，并创建 GitHub Release 和上传附件 |
+| `Build and push Docker image` | 手动，或由 `Release` 调用 | 独立构建并发布 TransPDF 和 Paperless webhook 镜像到 GHCR |
+| `Release` | 手动 | 先运行测试，再并行构建二进制程序和 Docker 镜像，最后创建 GitHub Release |
 
-源码测试独立运行。Docker 构建和 Release 不依赖 `Tests` 工作流的状态；发布前请检查对应提交的测试结果。Release 会等待三个平台的构建及程序启动检查全部通过。
+Release 会固定所选版本标签对应的提交，先运行完整源码测试；测试成功后，二进制构建和 Docker 镜像构建并行运行。三个平台的程序启动检查和两个 Docker 镜像构建全部成功后，才会创建 GitHub Release。
 
 ## 发布预编译程序
 
@@ -22,7 +22,7 @@
    ```
 
 3. 在 GitHub 的 **Actions → Release → Run workflow** 中，选择包含最新发布工作流的分支，填入 `tag`（如 `v1.0.0`）。测试版本如 `v1.0.0-rc.1` 可勾选 `prerelease`。
-4. 等待工作流完成。它会固定标签对应的提交，复用当前 `Build application` 的依赖收集和启动检查，再创建 Release、自动生成发布说明并上传附件。
+4. 等待工作流完成。它会固定标签对应的提交，先运行测试；测试成功后并行运行二进制构建和 Docker 构建，再创建 Release、自动生成发布说明并上传二进制附件。
 
 标签必须已存在，格式为 `v主版本.次版本.修订版本`，可附加预发布后缀。构建时会把该标签写入程序的 `VERSION`。发布流程不会创建或移动标签，也不会覆盖已有 Release；每次新发布请使用新标签。
 
@@ -52,4 +52,4 @@ Windows PowerShell 可使用 `Get-FileHash .\TransPDF-windows-x64.zip -Algorithm
 - `ghcr.io/yyuanc/transpdf`
 - `ghcr.io/yyuanc/transpdf-paperless-webhook`
 
-在默认分支运行会更新 `latest`；在 `v*` 版本标签运行会生成对应的版本镜像标签。`Release` 不会自动触发 Docker 发布。Compose 默认使用本地源码构建，直接使用发布镜像的示例见 [README](../README.md#快速开始)。
+手动运行该工作流时，在默认分支运行会更新 `latest`；在 `v*` 版本标签运行会生成对应的版本镜像标签。由 `Release` 调用时，两个镜像都会使用输入的版本标签。Compose 默认使用本地源码构建，直接使用发布镜像的示例见 [README](../README.md#快速开始)。
